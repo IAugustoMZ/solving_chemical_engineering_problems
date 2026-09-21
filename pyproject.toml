@@ -1,0 +1,27 @@
+[project]
+name = "solving-chemical-engineering-problems"
+version = "0.1.0"
+description = "Solving chemical engineering problems using Python and Jupyter Notebooks"
+authors = [
+    {name = "IZelioli",email = "i.augustomz@gmail.com"}
+]
+readme = "README.md"
+requires-python = "^3.14"
+dependencies = [
+    "numpy (>=2.5.3,<3.0.0)",
+    "scipy (>=1.18.1,<2.0.0)",
+    "matplotlib (>=3.11.2,<4.0.0)",
+    "pandas (>=3.0.6,<4.0.0)",
+    "sympy (>=1.14.0,<2.0.0)",
+    "ipykernel (>=7.3.0,<8.0.0)",
+    "pint (>=0.26.1,<0.27.0)"
+]
+
+
+[tool.poetry]
+packages = [{include = "src"}]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
