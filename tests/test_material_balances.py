@@ -10,8 +10,7 @@ import numpy as np
 from src.material_balances import (
     Component,
     Stream,
-    ProcessUnit,
-    calculate_stream_based_on_jam_mass,
+    ProcessUnit
 )
 
 
