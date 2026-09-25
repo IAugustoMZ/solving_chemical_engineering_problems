@@ -1,5 +1,7 @@
-import numpy as np
 import math
+
+import numpy as np
+
 
 def check_fraction(value: float, name: str = "Fraction") -> None:
     """
@@ -8,6 +10,7 @@ def check_fraction(value: float, name: str = "Fraction") -> None:
     if not (0 <= value <= 1):
         raise ValueError(f"{name} must be higher or equal to 0 and lower or equal to 1")
 
+
 def check_fractions_sum(fractions: list, name: str = "Fractions") -> None:
     """
     Checks if an array or list of fractions sums up to 1.
@@ -15,4 +18,3 @@ def check_fractions_sum(fractions: list, name: str = "Fractions") -> None:
     total = sum(fractions)
     if not math.isclose(total, 1.0, rel_tol=1e-5):
         raise ValueError(f"The {name} must sum up to 1 (got {total})")
-

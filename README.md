@@ -49,10 +49,18 @@ The repository is structured around core Chemical Engineering domains:
 
 ### Material Balances (`src.material_balances`)
 - **Multistream Material Balance Solver**: A generalized robust solver for steady-state, non-reactive multi-stream and multi-component systems.
-  - Automatically performs Degree of Freedom (DOF) analysis.
+  - Automatically performs Degree of Freedom (DOF) analysis accounting for ratio constraints.
   - Identifies unknown flow rates and species mass/mole fractions.
-  - Generates linear systems mathematically guaranteeing correct solutions utilizing substitution to prevent singular constraints.
+  - Uses scipy's `least_squares` optimizer with non-negative constraints for robust numerical solution.
   - Prints structured reports with solved stream variables, flows, and diagnostic messages.
+
+- **Ratio Constraints**: Flexible algebraic constraint system for process design with independent relationships:
+  - **FlowRatio**: Enforce relationships between stream flow rates (e.g., `F1 / F2 = k`)
+  - **ComponentFlowRatio**: Constrain component flow rate ratios across streams
+  - **CompositionRatio**: Specify composition ratios within a stream
+  - Each independent ratio reduces system DOF by 1, enabling unique solutions for previously underdetermined problems
+  - Example: Jam production case with strawberry-to-sugar mass ratio of 45:55
+
 - **Binary Mixture Separations**: Specific tools for solving standard vapor-liquid separation tasks.
 - **Accumulation Problems**: Example solvers for liquid tank filling via integral balances.
 
@@ -121,6 +129,64 @@ solving_chemical_engineering_problems/
 
 ---
 
+## 🧪 Testing & Quality Checks
+
+This repository maintains high code quality standards with automated testing and linting checks.
+
+### Running Tests
+
+```bash
+# Run all tests with coverage
+poetry run pytest tests/ -v --cov=src --cov-report=term
+
+# Run specific test file
+poetry run pytest tests/test_material_balances.py -v
+```
+
+### Code Quality Checks
+
+The project uses **black** (formatting), **isort** (import sorting), **flake8** (linting), and **pylint** (code analysis).
+
+#### Local Quality Checks
+
+```bash
+# Run quality checks locally before pushing
+./scripts/quality-check.sh
+
+# Run full pre-push checks (tests + quality)
+./scripts/pre-push.sh
+```
+
+#### Automatic Fixes
+
+```bash
+# Auto-format code with black
+poetry run black src/ tests/
+
+# Auto-sort imports with isort
+poetry run isort src/ tests/
+```
+
+### GitHub Actions
+
+Quality checks automatically run on:
+- Every push to `main` or `feature-*` branches
+- All pull requests to `main`
+
+The workflow checks:
+- ✅ Code formatting (black)
+- ✅ Import sorting (isort)
+- ✅ Linting (flake8, pylint)
+- ✅ Tests with coverage
+- ⚠️ Duplicate code detection
+
+---
+
 ## 💡 Contributing & Adding Problems
 
 Feel free to open issues or submit pull requests with interesting problems, textbook examples (e.g., Fogler, Levenspiel, Smith-Van Ness-Abbott, Geankoplis, Incropera), or real-world process simulations!
+
+**Before submitting a PR:**
+1. Ensure all tests pass: `poetry run pytest tests/`
+2. Run quality checks: `./scripts/quality-check.sh`
+3. Update documentation as needed

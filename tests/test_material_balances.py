@@ -5,13 +5,10 @@ Tests cover Components, Streams, ProcessUnits, and utility solver functions
 with focus on edge cases, error handling, and core functionality.
 """
 
-import pytest
 import numpy as np
-from src.material_balances import (
-    Component,
-    Stream,
-    ProcessUnit
-)
+import pytest
+
+from src.material_balances import Component, ProcessUnit, Stream
 
 
 class TestComponent:
@@ -213,19 +210,13 @@ class TestProcessUnit:
         acetone = Component("Acetone")
 
         feed = Stream(
-            "feed", 10.0, "mole",
-            [water, acetone],
-            {"Water": 0.65, "Acetone": None}
+            "feed", 10.0, "mole", [water, acetone], {"Water": 0.65, "Acetone": None}
         )
         vapor = Stream(
-            "vapor", None, "mole",
-            [water, acetone],
-            {"Water": 0.25, "Acetone": None}
+            "vapor", None, "mole", [water, acetone], {"Water": 0.25, "Acetone": None}
         )
         liquid = Stream(
-            "liquid", None, "mole",
-            [water, acetone],
-            {"Water": 0.813, "Acetone": None}
+            "liquid", None, "mole", [water, acetone], {"Water": 0.813, "Acetone": None}
         )
 
         unit = ProcessUnit("Evaporator", [feed], [vapor, liquid])
@@ -240,14 +231,14 @@ class TestProcessUnit:
         ethanol = Component("Ethanol")
 
         feed = Stream(
-            "feed", 10.0, "mole",
-            [water, acetone],
-            {"Water": 0.65, "Acetone": None}
+            "feed", 10.0, "mole", [water, acetone], {"Water": 0.65, "Acetone": None}
         )
         product = Stream(
-            "product", None, "mole",
+            "product",
+            None,
+            "mole",
             [water, ethanol],  # different components
-            {"Water": 0.5, "Ethanol": None}
+            {"Water": 0.5, "Ethanol": None},
         )
 
         with pytest.raises(ValueError, match="same components"):
@@ -259,19 +250,13 @@ class TestProcessUnit:
         acetone = Component("Acetone")
 
         feed = Stream(
-            "feed", 10.0, "mole",
-            [water, acetone],
-            {"Water": 0.65, "Acetone": None}
+            "feed", 10.0, "mole", [water, acetone], {"Water": 0.65, "Acetone": None}
         )
         vapor = Stream(
-            "vapor", None, "mole",
-            [water, acetone],
-            {"Water": 0.25, "Acetone": None}
+            "vapor", None, "mole", [water, acetone], {"Water": 0.25, "Acetone": None}
         )
         liquid = Stream(
-            "liquid", None, "mole",
-            [water, acetone],
-            {"Water": 0.813, "Acetone": None}
+            "liquid", None, "mole", [water, acetone], {"Water": 0.813, "Acetone": None}
         )
 
         unit = ProcessUnit("Evaporator", [feed], [vapor, liquid])
@@ -288,19 +273,13 @@ class TestProcessUnit:
         acetone = Component("Acetone")
 
         feed = Stream(
-            "feed", 10.0, "mole",
-            [water, acetone],
-            {"Water": 0.65, "Acetone": None}
+            "feed", 10.0, "mole", [water, acetone], {"Water": 0.65, "Acetone": None}
         )
         vapor = Stream(
-            "vapor", None, "mole",
-            [water, acetone],
-            {"Water": 0.75, "Acetone": None}
+            "vapor", None, "mole", [water, acetone], {"Water": 0.75, "Acetone": None}
         )
         liquid = Stream(
-            "liquid", None, "mole",
-            [water, acetone],
-            {"Water": 0.187, "Acetone": None}
+            "liquid", None, "mole", [water, acetone], {"Water": 0.187, "Acetone": None}
         )
 
         unit = ProcessUnit("Evaporator", [feed], [vapor, liquid])
@@ -310,21 +289,9 @@ class TestProcessUnit:
         """Test solvability check returns False when under-specified."""
         water = Component("Water")
 
-        inlet = Stream(
-            "inlet", 10.0, "mole",
-            [water],
-            {"Water": 1.0}
-        )
-        outlet1 = Stream(
-            "outlet1", None, "mole",
-            [water],
-            {"Water": 1.0}
-        )
-        outlet2 = Stream(
-            "outlet2", None, "mole",
-            [water],
-            {"Water": 1.0}
-        )
+        inlet = Stream("inlet", 10.0, "mole", [water], {"Water": 1.0})
+        outlet1 = Stream("outlet1", None, "mole", [water], {"Water": 1.0})
+        outlet2 = Stream("outlet2", None, "mole", [water], {"Water": 1.0})
 
         unit = ProcessUnit("Splitter", [inlet], [outlet1, outlet2])
         assert unit.is_solvable() is False
@@ -335,19 +302,13 @@ class TestProcessUnit:
         acetone = Component("Acetone")
 
         feed = Stream(
-            "feed", 10.0, "mole",
-            [water, acetone],
-            {"Water": 0.65, "Acetone": None}
+            "feed", 10.0, "mole", [water, acetone], {"Water": 0.65, "Acetone": None}
         )
         vapor = Stream(
-            "vapor", None, "mole",
-            [water, acetone],
-            {"Water": 0.75, "Acetone": None}
+            "vapor", None, "mole", [water, acetone], {"Water": 0.75, "Acetone": None}
         )
         liquid = Stream(
-            "liquid", None, "mole",
-            [water, acetone],
-            {"Water": 0.187, "Acetone": None}
+            "liquid", None, "mole", [water, acetone], {"Water": 0.187, "Acetone": None}
         )
 
         unit = ProcessUnit("Evaporator", [feed], [vapor, liquid])
@@ -360,31 +321,15 @@ class TestProcessUnit:
         assert liquid.flow_rate > 0
 
         # Check that total flow is conserved
-        assert np.isclose(
-            vapor.flow_rate + liquid.flow_rate,
-            feed.flow_rate,
-            atol=1e-4
-        )
+        assert np.isclose(vapor.flow_rate + liquid.flow_rate, feed.flow_rate, atol=1e-4)
 
     def test_process_unit_solve_unsolvable_raises_error(self):
         """Test that solving unsolvable system raises ValueError."""
         water = Component("Water")
 
-        inlet = Stream(
-            "inlet", 10.0, "mole",
-            [water],
-            {"Water": 1.0}
-        )
-        outlet1 = Stream(
-            "outlet1", None, "mole",
-            [water],
-            {"Water": 1.0}
-        )
-        outlet2 = Stream(
-            "outlet2", None, "mole",
-            [water],
-            {"Water": 1.0}
-        )
+        inlet = Stream("inlet", 10.0, "mole", [water], {"Water": 1.0})
+        outlet1 = Stream("outlet1", None, "mole", [water], {"Water": 1.0})
+        outlet2 = Stream("outlet2", None, "mole", [water], {"Water": 1.0})
 
         unit = ProcessUnit("Splitter", [inlet], [outlet1, outlet2])
 
@@ -397,19 +342,13 @@ class TestProcessUnit:
         acetone = Component("Acetone")
 
         feed = Stream(
-            "feed", 10.0, "mole",
-            [water, acetone],
-            {"Water": 0.65, "Acetone": None}
+            "feed", 10.0, "mole", [water, acetone], {"Water": 0.65, "Acetone": None}
         )
         vapor = Stream(
-            "vapor", None, "mole",
-            [water, acetone],
-            {"Water": 0.75, "Acetone": None}
+            "vapor", None, "mole", [water, acetone], {"Water": 0.75, "Acetone": None}
         )
         liquid = Stream(
-            "liquid", None, "mole",
-            [water, acetone],
-            {"Water": 0.187, "Acetone": None}
+            "liquid", None, "mole", [water, acetone], {"Water": 0.187, "Acetone": None}
         )
 
         unit = ProcessUnit("Evaporator", [feed], [vapor, liquid])
@@ -418,16 +357,16 @@ class TestProcessUnit:
         # Check water balance: input = output
         water_in = feed.flow_rate * feed.composition["Water"]
         water_out = (
-            vapor.flow_rate * vapor.composition["Water"] +
-            liquid.flow_rate * liquid.composition["Water"]
+            vapor.flow_rate * vapor.composition["Water"]
+            + liquid.flow_rate * liquid.composition["Water"]
         )
         assert np.isclose(water_in, water_out, atol=1e-6)
 
         # Check acetone balance: input = output
         acetone_in = feed.flow_rate * feed.composition["Acetone"]
         acetone_out = (
-            vapor.flow_rate * vapor.composition["Acetone"] +
-            liquid.flow_rate * liquid.composition["Acetone"]
+            vapor.flow_rate * vapor.composition["Acetone"]
+            + liquid.flow_rate * liquid.composition["Acetone"]
         )
         assert np.isclose(acetone_in, acetone_out, atol=1e-6)
 
@@ -435,21 +374,9 @@ class TestProcessUnit:
         """Test process unit with multiple input streams (mixer)."""
         water = Component("Water")
 
-        stream1 = Stream(
-            "inlet1", 5.0, "mole",
-            [water],
-            {"Water": 1.0}
-        )
-        stream2 = Stream(
-            "inlet2", 3.0, "mole",
-            [water],
-            {"Water": 1.0}
-        )
-        outlet = Stream(
-            "outlet", None, "mole",
-            [water],
-            {"Water": 1.0}
-        )
+        stream1 = Stream("inlet1", 5.0, "mole", [water], {"Water": 1.0})
+        stream2 = Stream("inlet2", 3.0, "mole", [water], {"Water": 1.0})
+        outlet = Stream("outlet", None, "mole", [water], {"Water": 1.0})
 
         mixer = ProcessUnit("Mixer", [stream1, stream2], [outlet])
         mixer.solve_material_balances()
@@ -461,21 +388,9 @@ class TestProcessUnit:
         """Test process unit with multiple output streams (splitter)."""
         water = Component("Water")
 
-        inlet = Stream(
-            "inlet", 10.0, "mole",
-            [water],
-            {"Water": 1.0}
-        )
-        outlet1 = Stream(
-            "outlet1", None, "mole",
-            [water],
-            {"Water": 1.0}
-        )
-        outlet2 = Stream(
-            "outlet2", None, "mole",
-            [water],
-            {"Water": 1.0}
-        )
+        inlet = Stream("inlet", 10.0, "mole", [water], {"Water": 1.0})
+        outlet1 = Stream("outlet1", None, "mole", [water], {"Water": 1.0})
+        outlet2 = Stream("outlet2", None, "mole", [water], {"Water": 1.0})
 
         splitter = ProcessUnit("Splitter", [inlet], [outlet1, outlet2])
         # This system is underdetermined (2 unknowns, 1 equation)

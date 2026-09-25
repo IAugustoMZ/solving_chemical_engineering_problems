@@ -30,7 +30,9 @@ class ProcessUnit:
         unknowns (int): Total number of unknown values to solve for.
     """
 
-    def __init__(self, name: str, input_streams: list, output_streams: list) -> None:
+    def __init__(
+        self, name: str, input_streams: list, output_streams: list, ratios: list = None
+    ) -> None:
         """
         Initialize a ProcessUnit with inlet and outlet streams.
 
@@ -42,9 +44,13 @@ class ProcessUnit:
             name (str): Unit identifier or tag.
             input_streams (list[Stream]): List of inlet Stream objects.
             output_streams (list[Stream]): List of outlet Stream objects.
+            ratios (list, optional): List of Ratio constraint objects that represent
+                                     independent relationships between streams/components.
+                                     Each ratio reduces DOF by 1. Defaults to empty list.
 
         Raises:
-            ValueError: If inlet and outlet streams don't have the same components.
+            ValueError: If inlet and outlet streams don't have the same components,
+                       or if ratio references are invalid.
 
         Example:
             >>> water = Component("Water")
@@ -61,8 +67,10 @@ class ProcessUnit:
         self.tol = 1e-6
         self.input_streams = input_streams
         self.output_streams = output_streams
+        self.ratios = ratios or []
 
         self._validate_stream_components()
+        self._validate_ratio_references()
         self.calculate_independent_material_balances()
         self.calculate_unknowns()
 
@@ -80,9 +88,26 @@ class ProcessUnit:
             comp.name for stream in self.output_streams for comp in stream.components
         }
         if input_components != output_components:
-            raise ValueError(
-                "Input and output streams must have the same components."
-            )
+            raise ValueError("Input and output streams must have the same components.")
+
+    def _validate_ratio_references(self) -> None:
+        """
+        Validate that all ratio constraints reference valid streams and components.
+
+        Raises:
+            ValueError: If a ratio references invalid streams or components.
+        """
+        streams_dict = {
+            stream.name: stream for stream in self.input_streams + self.output_streams
+        }
+
+        for i, ratio in enumerate(self.ratios):
+            try:
+                ratio.validate_references(streams_dict)
+            except (KeyError, ValueError) as e:
+                raise ValueError(
+                    f"Ratio {i} ({ratio.description}) has invalid references: {e}"
+                )
 
     def calculate_independent_material_balances(self) -> None:
         """
@@ -92,7 +117,8 @@ class ProcessUnit:
         unique components in the system.
         """
         self.independent_material_balances = max(
-            len(stream.components) for stream in self.input_streams + self.output_streams
+            len(stream.components)
+            for stream in self.input_streams + self.output_streams
         )
 
     def calculate_unknowns(self) -> None:
@@ -112,7 +138,10 @@ class ProcessUnit:
         """
         Check if the system has sufficient equations to solve for unknowns.
 
-        A system is solvable when: unknowns <= independent_material_balances
+        A system is solvable when:
+        degrees_of_freedom = unknowns - independent_material_balances - len(ratios) <= 0
+
+        Each ratio constraint reduces degrees of freedom by 1.
 
         Returns:
             bool: True if solvable, False otherwise.
@@ -121,7 +150,8 @@ class ProcessUnit:
             >>> if evap.is_solvable():
             ...     evap.solve_material_balances()
         """
-        return self.unknowns <= self.independent_material_balances
+        dof = self.unknowns - self.independent_material_balances - len(self.ratios)
+        return dof <= 0
 
     def suggest_missing_information(self) -> None:
         """
@@ -141,9 +171,7 @@ class ProcessUnit:
 
         for stream in self.input_streams + self.output_streams:
             if stream.flow_rate is None:
-                missing_info.append(
-                    f"Stream '{stream.name}': Missing flow rate."
-                )
+                missing_info.append(f"Stream '{stream.name}': Missing flow rate.")
 
             for comp_name, comp_value in stream.composition.items():
                 if comp_value is None:
@@ -197,9 +225,10 @@ class ProcessUnit:
         self, values: list, unknown_refs: list, component_names: list
     ) -> list:
         """
-        Calculate residuals for each component balance equation.
+        Calculate residuals for material balance and ratio constraint equations.
 
         For each component, residual = sum(input flows) - sum(output flows).
+        For each ratio constraint, residual = actual_ratio - target_ratio.
         At the solution, all residuals should be ~0.
 
         Parameters:
@@ -208,11 +237,13 @@ class ProcessUnit:
             component_names (list): Sorted list of unique component names.
 
         Returns:
-            list: Residual value for each component balance.
+            list: Residual values for each component balance and ratio constraint.
         """
         self._apply_unknowns(unknown_refs, values)
 
         residuals = []
+
+        # Material balance residuals
         for comp_name in component_names:
             input_total = sum(
                 stream.flow_rate * stream.composition[comp_name]
@@ -223,6 +254,13 @@ class ProcessUnit:
                 for stream in self.output_streams
             )
             residuals.append(input_total - output_total)
+
+        # Ratio constraint residuals
+        streams_dict = {
+            stream.name: stream for stream in self.input_streams + self.output_streams
+        }
+        for ratio in self.ratios:
+            residuals.append(ratio.compute_residual(streams_dict))
 
         return residuals
 
@@ -264,11 +302,14 @@ class ProcessUnit:
             }
         )
 
-        known_input_flow = sum(
-            stream.flow_rate
-            for stream in self.input_streams
-            if stream.flow_rate is not None
-        ) or 1.0
+        known_input_flow = (
+            sum(
+                stream.flow_rate
+                for stream in self.input_streams
+                if stream.flow_rate is not None
+            )
+            or 1.0
+        )
         x0 = [
             known_input_flow if kind == "flow_rate" else 1.0 / len(stream.components)
             for stream, kind, _ in unknown_refs
@@ -377,9 +418,7 @@ class ProcessUnit:
             )
 
         if any(stream.flow_rate is None for stream in streams):
-            print(
-                "  Overall: unavailable (one or more stream flow rates are unknown)"
-            )
+            print("  Overall: unavailable (one or more stream flow rates are unknown)")
         else:
             total_input = sum(stream.flow_rate for stream in self.input_streams)
             total_output = sum(stream.flow_rate for stream in self.output_streams)
