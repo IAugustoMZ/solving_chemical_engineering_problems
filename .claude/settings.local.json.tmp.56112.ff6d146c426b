@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(poetry run *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(poetry lock *)",
+      "Bash(git push *)",
+      "Bash(xargs cat)",
+      "Bash(python -m pytest tests/test_ratio_constraints.py -v)",
+      "Bash(python -m pytest tests/test_ratio_constraints.py::TestJamProductionCase::test_jam_production_solve -v)",
+      "Bash(python -m pytest tests/test_material_balances.py -v)",
+      "Bash(chmod +x /mnt/AdditionalData/personal_repo/solving_chemical_engineering_problems/scripts/quality-check.sh)",
+      "Bash(chmod +x /mnt/AdditionalData/personal_repo/solving_chemical_engineering_problems/scripts/pre-push.sh)",
+      "Bash(poetry install *)",
+      "Bash(bash scripts/quality-check.sh)",
+      "Bash(poetry update *)",
+      "Bash(cat)",
+      "Read(//tmp/**)",
+      "Bash(git diff-tree *)",
+      "Bash(python -m pytest tests/test_material_balances.py::TestStreamFactory -v)",
+      "Bash(python -m pytest tests/ -v)",
+      "Bash(python -c \"import json; nb = json.load\\(open\\('00_mass_energy_balances/00_simple_mass_balances.ipynb'\\)\\); [print\\(f\\\\\"Cell {i}: {c.get\\('id', 'no-id'\\)}\\\\\"\\) for i, c in enumerate\\(nb['cells']\\) if c['cell_type'] == 'code']\")",
+      "Bash(python)",
+      "Bash(python -m pytest tests/ -v --tb=short)",
+      "Bash(python -m pytest tests/test_material_balances.py::TestStreamFactory::test_add_ratio_valid_references -xvs)",
+      "Bash(python -m pytest tests/test_material_balances.py::TestStreamFactory::test_add_ratio -xvs)",
+      "Bash(python -m pytest tests/test_material_balances.py::TestStreamFactory -k \"ratio\" -xvs)",
+      "Bash(python -m pytest tests/test_material_balances.py::TestStreamFactory -xvs)",
+      "Bash(python -m pytest tests/test_material_balances.py -x)",
+      "Bash(python3)",
+      "Bash(python3 -m pytest tests/test_material_balances.py -v)",
+      "Bash(git commit -m 'docs: update jam production example to demonstrate DOF analysis with ratio constraints *)",
+      "Bash(git commit -m 'fix: suggest_missing_information\\(\\) should distinguish underdetermined vs overdetermined *)"
+    ]
+  }
+}

@@ -178,10 +178,10 @@ class ProcessUnit:
 
     def suggest_missing_information(self) -> None:
         """
-        Print suggestions for missing information if the system is not solvable.
+        Print suggestions for fixing an unsolvable system.
 
-        If the system is underdetermined (more unknowns than equations),
-        calculates how many more values are needed and lists candidates.
+        If underdetermined: suggests providing more values.
+        If overdetermined: suggests removing constraints.
         """
         if self.is_solvable():
             print(
@@ -191,25 +191,35 @@ class ProcessUnit:
             return
 
         dof = self.unknowns - self.independent_material_balances - len(self.ratios)
-        print(
-            f"To make the system solvable, consider providing {dof} more "
-            f"value{'s' if dof != 1 else ''}. Options:"
-        )
 
-        missing_info = []
+        if dof > 0:
+            print(
+                f"To make the system solvable, consider providing {dof} more "
+                f"value{'s' if dof != 1 else ''}. Options:"
+            )
 
-        for stream in self.input_streams + self.output_streams:
-            if stream.flow_rate is None:
-                missing_info.append(f"Stream '{stream.name}': flow rate")
+            missing_info = []
 
-            for comp_name, comp_value in stream.composition.items():
-                if comp_value is None:
-                    missing_info.append(
-                        f"Stream '{stream.name}': composition for '{comp_name}'"
-                    )
+            for stream in self.input_streams + self.output_streams:
+                if stream.flow_rate is None:
+                    missing_info.append(f"Stream '{stream.name}': flow rate")
 
-        for info in missing_info:
-            print(f"  - {info}")
+                for comp_name, comp_value in stream.composition.items():
+                    if comp_value is None:
+                        missing_info.append(
+                            f"Stream '{stream.name}': composition for '{comp_name}'"
+                        )
+
+            for info in missing_info:
+                print(f"  - {info}")
+        else:  # dof < 0
+            print(
+                f"To make the system solvable, you need to remove {-dof} constraint{'s' if dof != -1 else ''}. "
+                f"The system is over-specified. Options:"
+            )
+            print("  - Leave one or more stream compositions unspecified (use None)")
+            print("  - Leave one or more stream flow rates unspecified (use None)")
+            print("  - Remove one or more ratio constraints")
 
     def _collect_unknowns(self) -> list:
         """
