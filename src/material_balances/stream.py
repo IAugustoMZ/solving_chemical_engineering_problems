@@ -76,8 +76,8 @@ class Stream:
         Initialize a Stream with flow rate and composition data.
 
         Validates that the number of components matches composition values and
-        that compositions sum to 1.0 (if all specified). Automatically calculates
-        the complementary composition value if exactly one is None.
+        that specified compositions sum to <= 1.0. Multiple composition values
+        can be None and will be solved for if the system is properly determined.
 
         Parameters:
             name (str): Stream identifier or tag.
@@ -85,13 +85,13 @@ class Stream:
             flow_type (str): Type of flow rate (e.g., "mole", "mass").
             components (list): List of Component objects present in the stream.
             composition (dict): Dictionary mapping component names to fractions.
-                               Can have one None value for unknown composition.
+                               Can have multiple None values for unknown compositions.
             direction (str, optional): Flow direction, "input" or "output".
                                       Defaults to "input".
 
         Raises:
             ValueError: If number of components doesn't match composition values,
-                       or if composition values don't sum to ~1.0 when all specified.
+                       or if specified composition values don't sum to <= 1.0.
 
         Example:
             >>> water = Component("Water")
@@ -103,8 +103,8 @@ class Stream:
             ...     components=[water, acetone],
             ...     composition={"Water": 0.65, "Acetone": None}
             ... )
-            >>> stream.composition["Acetone"]
-            0.35
+            >>> stream.composition["Acetone"]  # Will be solved for, not auto-calculated
+            None
         """
         self.name = name
         self.flow_rate = flow_rate
@@ -115,7 +115,6 @@ class Stream:
 
         self._validate_components_composition()
         self._validate_composition_sum()
-        self.calculate_complementary_composition()
 
     def _validate_components_composition(self) -> None:
         """
@@ -131,41 +130,31 @@ class Stream:
 
     def _validate_composition_sum(self) -> None:
         """
-        Validate that specified composition values sum to 1.0.
+        Validate that specified composition values sum to <= 1.0.
 
-        Only validates if all composition values are specified (no None values).
+        If all values are specified, they must sum to exactly 1.0.
+        If some values are None, specified values must sum to <= 1.0
+        (the missing values will be solved for).
 
         Raises:
-            ValueError: If specified compositions don't sum to 1.0.
+            ValueError: If specified compositions exceed 1.0 or if all
+                       are specified but don't sum to 1.0.
         """
+        specified_values = [v for v in self.composition.values() if v is not None]
+        if not specified_values:
+            return
+
+        specified_sum = sum(specified_values)
+
         if all(value is not None for value in self.composition.values()):
-            if not np.isclose(sum(self.composition.values()), 1.0):
+            if not np.isclose(specified_sum, 1.0):
                 raise ValueError("Composition values must sum to 1.")
-
-    def calculate_complementary_composition(self) -> None:
-        """
-        Calculate missing composition value if exactly one is None.
-
-        If exactly one component's composition is None, calculate it as
-        1.0 minus the sum of all other known composition values.
-
-        Raises:
-            ValueError: If more than one composition value is missing.
-        """
-        none_count = sum(1 for v in self.composition.values() if v is None)
-
-        if none_count > 1:
-            raise ValueError(
-                "Cannot calculate complementary composition: "
-                "more than one composition value is missing."
-            )
-
-        if none_count == 1:
-            known_sum = sum(v for v in self.composition.values() if v is not None)
-            missing_component = next(
-                key for key, value in self.composition.items() if value is None
-            )
-            self.composition[missing_component] = 1.0 - known_sum
+        else:
+            if specified_sum > 1.0:
+                raise ValueError(
+                    "Specified composition values must not exceed 1.0 "
+                    "(missing values must sum to a non-negative amount)."
+                )
 
 
 class StreamFactory:

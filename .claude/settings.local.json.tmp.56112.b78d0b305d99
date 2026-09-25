@@ -31,7 +31,16 @@
       "Bash(python3)",
       "Bash(python3 -m pytest tests/test_material_balances.py -v)",
       "Bash(git commit -m 'docs: update jam production example to demonstrate DOF analysis with ratio constraints *)",
-      "Bash(git commit -m 'fix: suggest_missing_information\\(\\) should distinguish underdetermined vs overdetermined *)"
+      "Bash(git commit -m 'fix: suggest_missing_information\\(\\) should distinguish underdetermined vs overdetermined *)",
+      "Bash(python -m pytest tests/test_material_balances.py -xvs)",
+      "Bash(python -m pytest tests/test_material_balances.py::TestStream -xvs)",
+      "Bash(python -m pytest tests/test_material_balances.py::TestStream -v)",
+      "Bash(python -m pytest tests/test_material_balances.py::TestProcessUnit::test_process_unit_degree_of_freedom_calculation -xvs)",
+      "Bash(python -m pytest tests/test_material_balances.py::TestProcessUnit::test_process_unit_solve_material_balances -xvs)",
+      "Bash(python -m pytest tests/test_material_balances.py::TestStreamFactory::test_add_stream_with_none_composition -xvs)",
+      "Bash(python -m pytest tests/test_material_balances.py::TestMultipleNoneCompositions -v)",
+      "Bash(python -m pytest tests/ -v --tb=line)",
+      "Bash(git commit -m 'feat: allow multiple None compositions per stream with composition sum constraints *)"
     ]
   }
 }

@@ -193,7 +193,7 @@ class TestCompositionRatio:
             10.0,
             "mole",
             [water, acetone],
-            {"Water": 0.25, "Acetone": None},
+            {"Water": 0.25, "Acetone": 0.75},
         )
 
         ratio = CompositionRatio("outlet", "Acetone", "Water", target_ratio=3.0)
@@ -344,7 +344,7 @@ class TestJamProductionCase:
             None,
             "mass",
             [solids, sugar, water],
-            {"Solids": 0.15, "Sugar": 0, "Water": None},
+            {"Solids": 0.15, "Sugar": 0, "Water": 0.85},
         )
 
         # Sugar inlet: pure sugar
@@ -356,13 +356,13 @@ class TestJamProductionCase:
             {"Solids": 0, "Sugar": 1.0, "Water": 0},
         )
 
-        # Jam outlet: known composition (solids+sugar 2/3, water 1/3)
+        # Jam outlet: known composition (solids 10%, sugar 56.7%, water 33.3%)
         jam = Stream(
             "Jam",
             1.0,
             "mass",
             [solids, sugar, water],
-            {"Solids": 0.1, "Sugar": 0.567, "Water": None},
+            {"Solids": 0.1, "Sugar": 0.567, "Water": 0.333},
         )
 
         # Water outlet
@@ -374,17 +374,23 @@ class TestJamProductionCase:
             {"Solids": 0, "Sugar": 0, "Water": 1.0},
         )
 
-        # Ratio: m_strawberry / m_sugar = 45/55
-        ratio = FlowRatio("Strawberry", "SugarInlet", target_ratio=45 / 55)
+        # Without ratio: DOF = 3 unknowns - 3 material balances = 0 (solvable)
+        heater_no_ratio = ProcessUnit(
+            "Heater",
+            [strawberry, sugar_inlet],
+            [jam, evaporated],
+        )
+        assert heater_no_ratio.is_solvable()
 
+        # With ratio constraint: DOF = 3 - 3 - 1 = -1 (over-determined)
+        ratio = FlowRatio("Strawberry", "SugarInlet", target_ratio=45 / 55)
         heater = ProcessUnit(
             "Heater",
             [strawberry, sugar_inlet],
             [jam, evaporated],
             ratios=[ratio],
         )
-
-        assert heater.is_solvable()
+        assert not heater.is_solvable()  # Over-determined with ratio
 
     def test_jam_production_solve(self):
         """Test solving jam production material balance with ratio constraint."""

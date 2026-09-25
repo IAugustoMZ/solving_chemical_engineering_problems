@@ -68,6 +68,7 @@ class ProcessUnit:
         self.input_streams = input_streams
         self.output_streams = output_streams
         self.ratios = ratios or []
+        self._streams_needing_composition_constraint = []
 
         self._validate_stream_components()
         self._validate_ratio_references()
@@ -139,9 +140,11 @@ class ProcessUnit:
         Check if the system has sufficient equations to solve for unknowns.
 
         A system is solvable when:
-        degrees_of_freedom = unknowns - independent_material_balances - len(ratios) == 0
+        degrees_of_freedom = unknowns - independent_material_balances
+                            - len(ratios) - num_composition_constraints == 0
 
-        Each ratio constraint reduces degrees of freedom by 1.
+        Where num_composition_constraints = number of streams with unknown
+        compositions (each must sum to 1.0). Each ratio constraint reduces DOF by 1.
 
         Returns:
             bool: True if exactly determined (dof == 0), False if underdetermined or overdetermined.
@@ -150,7 +153,16 @@ class ProcessUnit:
             >>> if evap.is_solvable():
             ...     evap.solve_material_balances()
         """
-        dof = self.unknowns - self.independent_material_balances - len(self.ratios)
+        num_composition_constraints = sum(
+            1 for stream in self.input_streams + self.output_streams
+            if any(v is None for v in stream.composition.values())
+        )
+        dof = (
+            self.unknowns
+            - self.independent_material_balances
+            - len(self.ratios)
+            - num_composition_constraints
+        )
         return dof == 0
 
     def report_degrees_of_freedom(self) -> None:
@@ -161,11 +173,21 @@ class ProcessUnit:
         and resulting degrees of freedom to help users understand why the
         system is solvable or not.
         """
-        dof = self.unknowns - self.independent_material_balances - len(self.ratios)
+        num_composition_constraints = sum(
+            1 for stream in self.input_streams + self.output_streams
+            if any(v is None for v in stream.composition.values())
+        )
+        dof = (
+            self.unknowns
+            - self.independent_material_balances
+            - len(self.ratios)
+            - num_composition_constraints
+        )
 
         print(f"\nDegrees of Freedom Analysis for '{self.name}':")
         print(f"  Unknowns (flow rates + compositions): {self.unknowns}")
         print(f"  Independent material balance equations: {self.independent_material_balances}")
+        print(f"  Composition sum constraints: {num_composition_constraints}")
         print(f"  Ratio constraints: {len(self.ratios)}")
         print(f"  Degrees of freedom: {dof}")
 
@@ -258,9 +280,10 @@ class ProcessUnit:
         self, values: list, unknown_refs: list, component_names: list
     ) -> list:
         """
-        Calculate residuals for material balance and ratio constraint equations.
+        Calculate residuals for material balance, composition sum, and ratio constraints.
 
         For each component, residual = sum(input flows) - sum(output flows).
+        For each stream, composition residual = sum(compositions) - 1.0.
         For each ratio constraint, residual = actual_ratio - target_ratio.
         At the solution, all residuals should be ~0.
 
@@ -270,7 +293,8 @@ class ProcessUnit:
             component_names (list): Sorted list of unique component names.
 
         Returns:
-            list: Residual values for each component balance and ratio constraint.
+            list: Residual values for each material balance, composition sum,
+                  and ratio constraint.
         """
         self._apply_unknowns(unknown_refs, values)
 
@@ -287,6 +311,11 @@ class ProcessUnit:
                 for stream in self.output_streams
             )
             residuals.append(input_total - output_total)
+
+        # Composition sum constraints: only for streams with unknown compositions
+        for stream in self._streams_needing_composition_constraint:
+            composition_sum = sum(stream.composition.values())
+            residuals.append(composition_sum - 1.0)
 
         # Ratio constraint residuals
         streams_dict = {
@@ -334,6 +363,13 @@ class ProcessUnit:
                 for comp in stream.components
             }
         )
+
+        # Pre-identify streams that need composition sum constraints
+        # (those with at least one unknown composition)
+        self._streams_needing_composition_constraint = [
+            stream for stream in self.input_streams + self.output_streams
+            if any(v is None for v in stream.composition.values())
+        ]
 
         known_input_flow = (
             sum(
