@@ -46,23 +46,25 @@ feed = Stream(
 
 ### ProcessUnit
 
-Represents a piece of equipment with inlet and outlet streams. Performs material balance calculations and degree-of-freedom analysis.
+Represents a piece of equipment with inlet and outlet streams. Performs material balance calculations and degree-of-freedom analysis with support for optional algebraic ratio constraints.
 
 **Capabilities:**
 - Validates consistency (inlet and outlet must have same components)
 - Calculates independent material balance equations (= number of components)
 - Counts unknowns (None flow rates and compositions)
-- Determines if system is solvable (unknowns ≤ equations)
+- Incorporates optional ratio constraints to reduce DOF
+- Determines if system is solvable (unknowns ≤ equations + ratios)
 - Solves material balances using scipy's least_squares optimizer
 - Generates detailed balance reports with residual checks
 
 ```python
-from src.material_balances import ProcessUnit
+from src.material_balances import ProcessUnit, FlowRatio
 
 evaporator = ProcessUnit(
     name="Evaporator",
     input_streams=[feed],
-    output_streams=[vapor, liquid]
+    output_streams=[vapor, liquid],
+    ratios=[]  # Optional list of Ratio constraints
 )
 
 if evaporator.is_solvable():
@@ -126,22 +128,128 @@ evaporator.solve_material_balances()
 evaporator.print_report()
 ```
 
-## Degree of Freedom Analysis
+## Ratio Constraints
 
-The module automatically performs DOF analysis:
+The module supports optional algebraic constraints that represent independent relationships between streams or components, reducing the system's degrees of freedom.
 
-**Degrees of Freedom = Unknowns - Independent Material Balance Equations**
+### Available Constraint Types
+
+#### FlowRatio
+Constrains the ratio of flow rates between two streams.
+
+```python
+from src.material_balances import FlowRatio
+
+ratio = FlowRatio(
+    stream1_name="inlet1",
+    stream2_name="inlet2",
+    target_ratio=0.8  # inlet1.F / inlet2.F = 0.8
+)
+```
+
+#### ComponentFlowRatio
+Constrains the ratio of component flows between two streams.
+
+```python
+from src.material_balances import ComponentFlowRatio
+
+ratio = ComponentFlowRatio(
+    stream1_name="Strawberry",
+    comp1_name="Solids",
+    stream2_name="Sugar",
+    comp2_name="Sugar",
+    target_ratio=0.45/0.55
+)
+# (Strawberry.F × Strawberry.x_solids) / (Sugar.F × Sugar.x_sugar) = 45/55
+```
+
+#### CompositionRatio
+Constrains the ratio of component compositions within a single stream.
+
+```python
+from src.material_balances import CompositionRatio
+
+ratio = CompositionRatio(
+    stream_name="outlet",
+    comp1_name="Acetone",
+    comp2_name="Water",
+    target_ratio=3.0  # x_acetone / x_water = 3.0
+)
+```
+
+### Usage Example: Jam Production with Ratio Constraint
+
+```python
+from src.material_balances import (
+    Component, Stream, ProcessUnit, FlowRatio
+)
+
+# Components
+strawberry_solids = Component("Solids")
+sugar = Component("Sugar")
+water = Component("Water")
+
+# Input streams
+strawberry = Stream(
+    "Strawberry", None, "mass",
+    [strawberry_solids, sugar, water],
+    {"Solids": 0.15, "Sugar": 0, "Water": None}
+)
+
+sugar_inlet = Stream(
+    "Sugar", None, "mass",
+    [strawberry_solids, sugar, water],
+    {"Solids": 0, "Sugar": 1.0, "Water": 0}
+)
+
+# Output streams
+jam = Stream(
+    "Jam", 1.0, "mass",
+    [strawberry_solids, sugar, water],
+    {"Solids": 0.1, "Sugar": 0.567, "Water": None}
+)
+
+water_evap = Stream(
+    "Evaporated", None, "mass",
+    [strawberry_solids, sugar, water],
+    {"Solids": 0, "Sugar": 0, "Water": 1.0}
+)
+
+# Ratio constraint: strawberry/sugar = 45/55
+ratio = FlowRatio("Strawberry", "Sugar", target_ratio=45/55)
+
+# Solve with constraint
+heater = ProcessUnit(
+    "Heater",
+    [strawberry, sugar_inlet],
+    [jam, water_evap],
+    ratios=[ratio]  # Add ratio constraint
+)
+
+print(f"Solvable: {heater.is_solvable()}")
+heater.solve_material_balances()
+heater.print_report()
+```
+
+## Degree of Freedom Analysis (with Ratio Constraints)
+
+The module automatically performs DOF analysis accounting for all constraints:
+
+**Degrees of Freedom = Unknowns - Independent Material Balance Equations - Number of Independent Ratios**
 
 Where:
 - **Independent Material Balance Equations** = Number of unique components
 - **Unknowns** = Number of None values in all stream flow rates and compositions
+- **Number of Independent Ratios** = Count of ratio constraints (each reduces DOF by 1)
 
-System is **solvable** when: **DOF ≤ 0** (i.e., unknowns ≤ equations)
+System is **solvable** when: **DOF ≤ 0** (i.e., unknowns ≤ equations + ratios)
 
-Example:
-- Evaporator with 2 components: 2 independent material balances
-- 2 output streams with unknown flow rates: 2 unknowns
-- DOF = 2 - 2 = 0 → Solvable ✓
+### Example: Splitter with Flow Ratio
+
+- Single component: 1 independent material balance
+- Two output streams with unknown flow rates: 2 unknowns
+- Without ratio: DOF = 2 - 1 = 1 → Not solvable ✗
+- **With FlowRatio constraint**: DOF = 2 - 1 - 1 = 0 → Solvable ✓
 
 ## Validation and Error Handling
 
@@ -165,17 +273,31 @@ Material balance solving uses scipy's `least_squares` optimizer:
 
 ## Test Suite
 
-Comprehensive test coverage (36 tests):
+Comprehensive test coverage (51 tests across two test files):
 
+### test_material_balances.py (26 tests)
 - **Component tests**: Basic creation and attributes
 - **Stream tests**: Initialization, validation, complementary composition, edge cases
 - **ProcessUnit tests**: Initialization, DOF analysis, solvability, solving, multi-stream cases
-- **Solver tests**: Jam calculation, mass balance verification, parameter sensitivity
 - **Integration tests**: Complete problem workflows
+
+### test_ratio_constraints.py (25 tests)
+- **FlowRatio tests**: Creation, residual calculation, validation
+- **ComponentFlowRatio tests**: Component flow calculations, multi-component systems
+- **CompositionRatio tests**: Composition ratio verification
+- **ProcessUnit+Ratios tests**: Integration with ratio constraints, DOF accounting
+- **Jam production case**: Real-world example with flow ratio constraint
 
 Run tests with:
 ```bash
-poetry run pytest tests/test_material_balances.py -v
+# Run all tests
+poetry run pytest tests/ -v
+
+# Run specific test file
+poetry run pytest tests/test_ratio_constraints.py -v
+
+# Run with coverage
+poetry run pytest tests/ --cov=src --cov-report=term
 ```
 
 ## Requirements
@@ -188,13 +310,15 @@ poetry run pytest tests/test_material_balances.py -v
 
 ```
 src/material_balances/
-├── __init__.py              # Public API
-├── components.py            # Component class
-├── stream.py                # Stream class
-├── process_unit.py          # ProcessUnit class
-├── solvers.py               # Solver functions
-└── README.md                # This file
+├── __init__.py                  # Public API
+├── components.py                # Component class
+├── stream.py                    # Stream class
+├── process_unit.py              # ProcessUnit class with ratio support
+├── ratio_constraints.py         # Ratio constraint classes (Ratio, FlowRatio, etc.)
+├── README.md                    # This file
+└── solvers.py                   # Solver functions
 
 tests/
-└── test_material_balances.py  # Comprehensive test suite
+├── test_material_balances.py    # Stream, Component, ProcessUnit tests (26 tests)
+└── test_ratio_constraints.py    # Ratio constraint integration tests (25 tests)
 ```

@@ -1,0 +1,49 @@
+name: Code Quality Checks
+
+on:
+  push:
+    branches: [ main, feature-* ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.14"]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install dependencies with Poetry
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install poetry
+        poetry install
+
+    - name: Check code formatting with black
+      run: poetry run black --check src/ tests/
+      continue-on-error: false
+
+    - name: Check import sorting with isort
+      run: poetry run isort --check-only src/ tests/
+      continue-on-error: false
+
+    - name: Lint with flake8
+      run: poetry run flake8 src/ tests/ --count --select=E9,F63,F7,F82 --show-source --statistics
+      continue-on-error: true
+
+    - name: Lint with pylint
+      run: poetry run pylint src/ --disable=all --enable=E,F
+      continue-on-error: true
+
+    - name: Check for duplicate code
+      run: |
+        poetry run pylint src/ --disable=all --enable=duplicate-code
+      continue-on-error: true
