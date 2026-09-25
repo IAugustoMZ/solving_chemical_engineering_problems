@@ -139,19 +139,19 @@ class ProcessUnit:
         Check if the system has sufficient equations to solve for unknowns.
 
         A system is solvable when:
-        degrees_of_freedom = unknowns - independent_material_balances - len(ratios) <= 0
+        degrees_of_freedom = unknowns - independent_material_balances - len(ratios) == 0
 
         Each ratio constraint reduces degrees of freedom by 1.
 
         Returns:
-            bool: True if solvable, False otherwise.
+            bool: True if exactly determined (dof == 0), False if underdetermined or overdetermined.
 
         Example:
             >>> if evap.is_solvable():
             ...     evap.solve_material_balances()
         """
         dof = self.unknowns - self.independent_material_balances - len(self.ratios)
-        return dof <= 0
+        return dof == 0
 
     def report_degrees_of_freedom(self) -> None:
         """
@@ -169,10 +169,12 @@ class ProcessUnit:
         print(f"  Ratio constraints: {len(self.ratios)}")
         print(f"  Degrees of freedom: {dof}")
 
-        if dof <= 0:
-            print(f"  Status: SOLVABLE (need to provide {-dof} more value{'s' if dof != -1 else ''})")
-        else:
+        if dof > 0:
             print(f"  Status: UNDERDETERMINED (need to provide {dof} more value{'s' if dof != 1 else ''})")
+        elif dof == 0:
+            print(f"  Status: SOLVABLE (exactly determined)")
+        else:  # dof < 0
+            print(f"  Status: OVERDETERMINED (system has {-dof} conflicting constraint{'s' if dof != -1 else ''})")
 
     def suggest_missing_information(self) -> None:
         """
