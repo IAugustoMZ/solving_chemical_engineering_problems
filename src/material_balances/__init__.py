@@ -14,7 +14,6 @@ Main components:
 from .components import Component
 from .stream import Stream
 from .process_unit import ProcessUnit
-from .solvers import calculate_stream_based_on_jam_mass
 
 __all__ = [
     "Component",
