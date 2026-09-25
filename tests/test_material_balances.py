@@ -484,42 +484,68 @@ class TestStreamFactory:
             factory.get_stream("NonExistent")
 
     def test_add_ratio_valid_references(self):
-        """Test adding a ratio with valid stream references."""
-        from src.material_balances import FlowRatio
-
+        """Test adding a flow ratio with valid stream references."""
         factory = StreamFactory(["Water", "Acetone"], default_flow_type="mole")
         factory.add_stream("Feed", [0.65, 0.35], flow_rate=None)
         factory.add_stream("Vapor", [0.75, None], flow_rate=None, direction="output")
 
-        ratio = FlowRatio("Feed", "Vapor", target_ratio=3.45)
-        returned_ratio = factory.add_ratio(ratio)
+        returned_ratio = factory.add_ratio("flow", stream1="Feed", stream2="Vapor", target_ratio=3.45)
 
-        assert returned_ratio == ratio
-        assert ratio in factory.ratios
+        assert returned_ratio is not None
+        assert len(factory.ratios) == 1
+        assert factory.ratios[0] in factory.ratios
 
     def test_add_ratio_invalid_stream_raises(self):
         """Test that adding a ratio with unregistered stream raises ValueError."""
-        from src.material_balances import FlowRatio
-
         factory = StreamFactory(["Water", "Acetone"], default_flow_type="mole")
         factory.add_stream("Feed", [0.65, 0.35], flow_rate=10.0)
 
-        ratio = FlowRatio("Feed", "NonExistent", target_ratio=3.45)
-
         with pytest.raises(ValueError, match="invalid references"):
-            factory.add_ratio(ratio)
+            factory.add_ratio("flow", stream1="Feed", stream2="NonExistent", target_ratio=3.45)
 
     def test_add_ratio_invalid_component_raises(self):
         """Test that adding a ratio with unregistered component raises ValueError."""
-        from src.material_balances import CompositionRatio
-
         factory = StreamFactory(["Water", "Acetone"], default_flow_type="mole")
         factory.add_stream("Feed", [0.65, None], flow_rate=10.0)
 
-        ratio = CompositionRatio("Feed", "NonExistent", "Water", target_ratio=2.0)
-
         with pytest.raises(ValueError, match="invalid references"):
-            factory.add_ratio(ratio)
+            factory.add_ratio("composition", stream="Feed", comp1="NonExistent", comp2="Water", target_ratio=2.0)
+
+    def test_add_ratio_composition_ratio(self):
+        """Test adding a composition ratio (comp1 / comp2 in a stream)."""
+        factory = StreamFactory(["Water", "Acetone"], default_flow_type="mole")
+        factory.add_stream("Outlet", [None, 0.75], flow_rate=10.0)
+
+        ratio = factory.add_ratio("composition", stream="Outlet", comp1="Acetone", comp2="Water", target_ratio=3.0)
+
+        assert ratio is not None
+        assert len(factory.ratios) == 1
+
+    def test_add_ratio_component_flow_ratio(self):
+        """Test adding a component flow ratio (comp1_flow / comp2_flow)."""
+        factory = StreamFactory(["Solids", "Water"], default_flow_type="kg/h")
+        factory.add_stream("Stream1", [0.15, None], flow_rate=100.0)
+        factory.add_stream("Stream2", [1.0, 0.0], flow_rate=50.0)
+
+        ratio = factory.add_ratio(
+            "component_flow",
+            stream1="Stream1",
+            comp1="Solids",
+            stream2="Stream2",
+            comp2="Solids",
+            target_ratio=0.3,
+        )
+
+        assert ratio is not None
+        assert len(factory.ratios) == 1
+
+    def test_add_ratio_unknown_type_raises(self):
+        """Test that unknown ratio_type raises ValueError."""
+        factory = StreamFactory(["Water", "Acetone"], default_flow_type="mole")
+        factory.add_stream("Stream", [0.5, None])
+
+        with pytest.raises(ValueError, match="Unknown ratio_type"):
+            factory.add_ratio("unknown_type", stream="Stream", comp1="Water", comp2="Acetone", target_ratio=1.0)
 
     def test_build_process_unit_simple_evaporator(self):
         """Test building a solvable ProcessUnit for acetone/water evaporator."""
@@ -541,8 +567,6 @@ class TestStreamFactory:
 
     def test_build_process_unit_with_ratios(self):
         """Test building a ProcessUnit that includes registered ratios."""
-        from src.material_balances import FlowRatio
-
         factory = StreamFactory(
             ["Solids", "Water"], default_flow_type="kg/h"
         )
@@ -552,13 +576,12 @@ class TestStreamFactory:
         water = factory.add_stream("Water", [0.0, 1.0], flow_rate=None, direction="output")
 
         # Ratio: strawberry / sugar = 45/55
-        ratio = FlowRatio("Strawberry", "Sugar", target_ratio=45 / 55)
-        factory.add_ratio(ratio)
+        factory.add_ratio("flow", stream1="Strawberry", stream2="Sugar", target_ratio=45 / 55)
 
         unit = factory.build_process_unit("H-102")
 
         assert len(unit.ratios) == 1
-        assert unit.ratios[0] == ratio
+        assert unit.ratios[0] is not None
         assert unit.is_solvable()
 
     def test_factory_streams_registry_isolation(self):

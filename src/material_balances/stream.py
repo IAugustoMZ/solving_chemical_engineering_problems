@@ -306,31 +306,75 @@ class StreamFactory:
         """
         return self.streams[name]
 
-    def add_ratio(self, ratio):
+    def add_ratio(self, ratio_type="flow", **kwargs):
         """
-        Register a ratio constraint, validating its references.
+        Create and register a ratio constraint from raw parameters.
 
-        The ratio is validated to ensure it only references streams and components
-        already registered in this factory (via prior add_stream calls).
+        The factory automatically instantiates the appropriate Ratio subclass
+        (FlowRatio, CompositionRatio, or ComponentFlowRatio) based on ratio_type
+        and validates that all referenced streams and components are registered.
 
         Parameters:
-            ratio (Ratio): A Ratio constraint object (FlowRatio, ComponentFlowRatio,
-                          or CompositionRatio).
+            ratio_type (str): Type of ratio constraint. Options:
+                - "flow": FlowRatio between two stream flow rates
+                - "composition": CompositionRatio between two component compositions
+                - "component_flow": ComponentFlowRatio between component flows
+
+                Defaults to "flow".
+
+            **kwargs: Arguments specific to the ratio_type:
+
+                For "flow": stream1, stream2, target_ratio
+                    >>> factory.add_ratio("flow", stream1="Feed", stream2="Vapor", target_ratio=3.45)
+
+                For "composition": stream, comp1, comp2, target_ratio
+                    >>> factory.add_ratio("composition", stream="Outlet", comp1="Acetone",
+                    ...                  comp2="Water", target_ratio=4.0)
+
+                For "component_flow": stream1, comp1, stream2, comp2, target_ratio
+                    >>> factory.add_ratio("component_flow", stream1="Strawberry", comp1="Solids",
+                    ...                  stream2="Sugar", comp2="Sugar", target_ratio=0.45)
 
         Returns:
-            ratio: The same Ratio object, now registered.
+            Ratio: The newly created and registered Ratio object.
 
         Raises:
-            ValueError: If the ratio references a stream or component not in this factory.
+            ValueError: If ratio_type is unknown, required parameters are missing,
+                       or if the ratio references a stream or component not in this factory.
 
         Example:
-            >>> from src.material_balances import FlowRatio
             >>> factory = StreamFactory(["Water", "Acetone"], default_flow_type="mole")
             >>> feed = factory.add_stream("Feed", [0.65, 0.35], flow_rate=10)
             >>> vapor = factory.add_stream("Vapor", [0.25, None], direction="output")
-            >>> ratio = FlowRatio("Feed", "Vapor", target_ratio=3.45)
-            >>> factory.add_ratio(ratio)
+            >>> factory.add_ratio("flow", stream1="Feed", stream2="Vapor", target_ratio=3.45)
         """
+        from .ratio_constraints import ComponentFlowRatio, CompositionRatio, FlowRatio
+
+        if ratio_type == "flow":
+            ratio = FlowRatio(
+                kwargs["stream1"], kwargs["stream2"], kwargs["target_ratio"]
+            )
+        elif ratio_type == "composition":
+            ratio = CompositionRatio(
+                kwargs["stream"],
+                kwargs["comp1"],
+                kwargs["comp2"],
+                kwargs["target_ratio"],
+            )
+        elif ratio_type == "component_flow":
+            ratio = ComponentFlowRatio(
+                kwargs["stream1"],
+                kwargs["comp1"],
+                kwargs["stream2"],
+                kwargs["comp2"],
+                kwargs["target_ratio"],
+            )
+        else:
+            raise ValueError(
+                f"Unknown ratio_type '{ratio_type}'. "
+                f"Choose from: 'flow', 'composition', 'component_flow'."
+            )
+
         try:
             ratio.validate_references(self.streams)
         except (KeyError, ValueError) as e:

@@ -153,12 +153,33 @@ class ProcessUnit:
         dof = self.unknowns - self.independent_material_balances - len(self.ratios)
         return dof <= 0
 
+    def report_degrees_of_freedom(self) -> None:
+        """
+        Print a detailed degrees of freedom (DOF) analysis.
+
+        Shows the number of unknowns, independent equations, constraints,
+        and resulting degrees of freedom to help users understand why the
+        system is solvable or not.
+        """
+        dof = self.unknowns - self.independent_material_balances - len(self.ratios)
+
+        print(f"\nDegrees of Freedom Analysis for '{self.name}':")
+        print(f"  Unknowns (flow rates + compositions): {self.unknowns}")
+        print(f"  Independent material balance equations: {self.independent_material_balances}")
+        print(f"  Ratio constraints: {len(self.ratios)}")
+        print(f"  Degrees of freedom: {dof}")
+
+        if dof <= 0:
+            print(f"  Status: SOLVABLE (need to provide {-dof} more value{'s' if dof != -1 else ''})")
+        else:
+            print(f"  Status: UNDERDETERMINED (need to provide {dof} more value{'s' if dof != 1 else ''})")
+
     def suggest_missing_information(self) -> None:
         """
         Print suggestions for missing information if the system is not solvable.
 
-        If the system is over-determined (more unknowns than equations),
-        lists which stream flow rates or compositions are unknown.
+        If the system is underdetermined (more unknowns than equations),
+        calculates how many more values are needed and lists candidates.
         """
         if self.is_solvable():
             print(
@@ -167,26 +188,26 @@ class ProcessUnit:
             )
             return
 
+        dof = self.unknowns - self.independent_material_balances - len(self.ratios)
+        print(
+            f"To make the system solvable, consider providing {dof} more "
+            f"value{'s' if dof != 1 else ''}. Options:"
+        )
+
         missing_info = []
 
         for stream in self.input_streams + self.output_streams:
             if stream.flow_rate is None:
-                missing_info.append(f"Stream '{stream.name}': Missing flow rate.")
+                missing_info.append(f"Stream '{stream.name}': flow rate")
 
             for comp_name, comp_value in stream.composition.items():
                 if comp_value is None:
                     missing_info.append(
-                        f"Stream '{stream.name}': "
-                        f"Missing composition for component '{comp_name}'."
+                        f"Stream '{stream.name}': composition for '{comp_name}'"
                     )
 
-        if missing_info:
-            print(
-                "To make the system solvable, consider providing the "
-                "following missing information:"
-            )
-            for info in missing_info:
-                print(f"  {info}")
+        for info in missing_info:
+            print(f"  - {info}")
 
     def _collect_unknowns(self) -> list:
         """
