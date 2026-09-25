@@ -1,11 +1,44 @@
 """
-Stream class for representing process streams in material balance problems.
+Stream and Component classes for representing process streams in material balance problems.
 
-This module provides the Stream class, which represents a stream of material
-flowing through a process unit with specified flow rate, composition, and components.
+This module provides the Component class (representing chemical species) and the Stream class
+(representing material flows with composition), along with StreamFactory for convenient
+multi-stream creation from a shared component list.
 """
 
 import numpy as np
+
+
+class Component:
+    """
+    Represents a chemical component or species in a process stream.
+
+    A Component is a fundamental entity in material balance calculations,
+    representing individual chemical species (e.g., H2O, C2H5OH, C12H22O11).
+    Components are referenced by name and used in composition calculations
+    for streams and material balances for process units.
+
+    Attributes:
+        name (str): The name or identifier of the component (e.g., "Water",
+                    "Acetone", "Sugar").
+
+    Example:
+        >>> water = Component("Water")
+        >>> water.name
+        'Water'
+    """
+
+    def __init__(self, name: str) -> None:
+        """
+        Initialize a Component with a given name.
+
+        Parameters:
+            name (str): The name or identifier of the chemical component.
+
+        Example:
+            >>> acetone = Component("Acetone")
+        """
+        self.name = name
 
 
 class Stream:
@@ -133,3 +166,214 @@ class Stream:
                 key for key, value in self.composition.items() if value is None
             )
             self.composition[missing_component] = 1.0 - known_sum
+
+
+class StreamFactory:
+    """
+    Factory for creating and managing multiple streams with a shared component list.
+
+    StreamFactory simplifies the creation of multiple streams by requiring a component
+    list to be specified once. Streams are created via add_stream() using positional
+    compositions (in the same order as the factory's component list) rather than
+    manually constructing composition dicts. The factory also manages ratio constraints,
+    validating that ratios only reference registered streams and components.
+
+    Attributes:
+        component_names (list[str]): List of component names (e.g., ["Water", "Acetone"]).
+        components (list[Component]): Corresponding Component objects (shared across all streams).
+        default_flow_type (str or None): Default flow type (e.g., "mole", "mass")
+                                        applied if not overridden per add_stream call.
+        streams (dict[str, Stream]): Registry of created streams, keyed by name.
+        ratios (list[Ratio]): List of registered ratio constraints (validated against streams).
+
+    Example:
+        >>> factory = StreamFactory(["Water", "Acetone"], default_flow_type="mole")
+        >>> feed = factory.add_stream("Feed", [0.65, 0.35], flow_rate=10)
+        >>> vapor = factory.add_stream("Vapor", [0.25, None], direction="output")
+        >>> from src.material_balances import FlowRatio
+        >>> ratio = FlowRatio("Feed", "Vapor", target_ratio=3.45)
+        >>> factory.add_ratio(ratio)
+        >>> unit = factory.build_process_unit("Evaporator")
+    """
+
+    def __init__(
+        self, component_names: list, default_flow_type: str = None
+    ) -> None:
+        """
+        Initialize a StreamFactory with a shared component list.
+
+        Parameters:
+            component_names (list[str]): Names of all components present in streams
+                                        created by this factory (e.g., ["Water", "Acetone"]).
+            default_flow_type (str, optional): Default flow type (e.g., "mole", "mass").
+                                             If set, add_stream calls can omit flow_type.
+                                             If None, flow_type is required on each add_stream.
+                                             Defaults to None.
+
+        Example:
+            >>> factory = StreamFactory(["Water", "Acetone"], default_flow_type="mole")
+        """
+        self.component_names = component_names
+        self.components = [Component(name) for name in component_names]
+        self.default_flow_type = default_flow_type
+        self.streams: dict[str, Stream] = {}
+        self.ratios: list = []
+
+    def add_stream(
+        self,
+        name: str,
+        compositions: list,
+        flow_rate: float = None,
+        flow_type: str = None,
+        direction: str = "input",
+    ) -> Stream:
+        """
+        Create and register a stream using positional compositions.
+
+        Parameters:
+            name (str): Unique identifier for the stream (e.g., "Feed", "Product").
+            compositions (list[float or None]): Component fractions in the same order
+                                               as the factory's component_names.
+                                               Can include one None for auto-calculation.
+            flow_rate (float, optional): Flow rate value. None if unknown (to be solved).
+                                        Defaults to None.
+            flow_type (str, optional): Type of flow rate (e.g., "mole", "mass", "volume").
+                                      If not provided, uses factory's default_flow_type.
+                                      Defaults to None.
+            direction (str, optional): Flow direction, "input" or "output".
+                                      Defaults to "input".
+
+        Returns:
+            Stream: The newly created and registered Stream object.
+
+        Raises:
+            ValueError: If stream name is already registered, composition length doesn't
+                       match component count, or if flow_type is required but missing.
+
+        Example:
+            >>> factory = StreamFactory(["Water", "Acetone"], default_flow_type="mole")
+            >>> feed = factory.add_stream("Feed", [0.65, 0.35], flow_rate=10)
+            >>> vapor = factory.add_stream("Vapor", [0.25, None], direction="output")
+        """
+        if name in self.streams:
+            raise ValueError(
+                f"Stream '{name}' is already registered in this factory."
+            )
+
+        if len(compositions) != len(self.components):
+            raise ValueError(
+                f"Composition length ({len(compositions)}) must match component count "
+                f"({len(self.components)})."
+            )
+
+        resolved_flow_type = flow_type or self.default_flow_type
+        if resolved_flow_type is None:
+            raise ValueError(
+                "flow_type must be provided either per stream or via factory default."
+            )
+
+        composition = dict(zip(self.component_names, compositions))
+
+        stream = Stream(
+            name=name,
+            flow_rate=flow_rate,
+            flow_type=resolved_flow_type,
+            components=self.components,
+            composition=composition,
+            direction=direction,
+        )
+
+        self.streams[name] = stream
+        return stream
+
+    def get_stream(self, name: str) -> Stream:
+        """
+        Retrieve a registered stream by name.
+
+        Parameters:
+            name (str): The stream identifier.
+
+        Returns:
+            Stream: The registered Stream object.
+
+        Raises:
+            KeyError: If the stream name is not registered.
+
+        Example:
+            >>> factory = StreamFactory(["Water", "Acetone"], default_flow_type="mole")
+            >>> feed = factory.add_stream("Feed", [0.65, 0.35], flow_rate=10)
+            >>> same_feed = factory.get_stream("Feed")
+        """
+        return self.streams[name]
+
+    def add_ratio(self, ratio):
+        """
+        Register a ratio constraint, validating its references.
+
+        The ratio is validated to ensure it only references streams and components
+        already registered in this factory (via prior add_stream calls).
+
+        Parameters:
+            ratio (Ratio): A Ratio constraint object (FlowRatio, ComponentFlowRatio,
+                          or CompositionRatio).
+
+        Returns:
+            ratio: The same Ratio object, now registered.
+
+        Raises:
+            ValueError: If the ratio references a stream or component not in this factory.
+
+        Example:
+            >>> from src.material_balances import FlowRatio
+            >>> factory = StreamFactory(["Water", "Acetone"], default_flow_type="mole")
+            >>> feed = factory.add_stream("Feed", [0.65, 0.35], flow_rate=10)
+            >>> vapor = factory.add_stream("Vapor", [0.25, None], direction="output")
+            >>> ratio = FlowRatio("Feed", "Vapor", target_ratio=3.45)
+            >>> factory.add_ratio(ratio)
+        """
+        try:
+            ratio.validate_references(self.streams)
+        except (KeyError, ValueError) as e:
+            raise ValueError(
+                f"Ratio ({ratio.description}) has invalid references: {e}"
+            )
+
+        self.ratios.append(ratio)
+        return ratio
+
+    def build_process_unit(self, name: str):
+        """
+        Build a ProcessUnit from registered streams and ratios.
+
+        Splits registered streams into input and output groups based on direction,
+        then constructs a ProcessUnit with all registered ratios.
+
+        Parameters:
+            name (str): Unit identifier or tag for the ProcessUnit.
+
+        Returns:
+            ProcessUnit: A ProcessUnit ready to solve (or to verify solvability).
+
+        Example:
+            >>> factory = StreamFactory(["Water", "Acetone"], default_flow_type="mole")
+            >>> feed = factory.add_stream("Feed", [0.65, 0.35], flow_rate=10)
+            >>> vapor = factory.add_stream("Vapor", [0.25, None], direction="output")
+            >>> liquid = factory.add_stream("Liquid", [0.187, None], direction="output")
+            >>> unit = factory.build_process_unit("Evaporator")
+            >>> unit.solve_material_balances()
+        """
+        from .process_unit import ProcessUnit
+
+        input_streams = [
+            s for s in self.streams.values() if s.direction == "input"
+        ]
+        output_streams = [
+            s for s in self.streams.values() if s.direction == "output"
+        ]
+
+        return ProcessUnit(
+            name=name,
+            input_streams=input_streams,
+            output_streams=output_streams,
+            ratios=self.ratios,
+        )

@@ -8,7 +8,7 @@ with focus on edge cases, error handling, and core functionality.
 import numpy as np
 import pytest
 
-from src.material_balances import Component, ProcessUnit, Stream
+from src.material_balances import Component, ProcessUnit, Stream, StreamFactory
 
 
 class TestComponent:
@@ -396,3 +396,181 @@ class TestProcessUnit:
         # This system is underdetermined (2 unknowns, 1 equation)
         # So it should not be solvable without additional constraints
         assert not splitter.is_solvable()
+
+
+class TestStreamFactory:
+    """Test suite for StreamFactory class."""
+
+    def test_factory_initialization(self):
+        """Test basic factory creation with component list."""
+        factory = StreamFactory(["Water", "Acetone"], default_flow_type="mole")
+        assert factory.component_names == ["Water", "Acetone"]
+        assert len(factory.components) == 2
+        assert factory.components[0].name == "Water"
+        assert factory.components[1].name == "Acetone"
+        assert factory.default_flow_type == "mole"
+        assert factory.streams == {}
+        assert factory.ratios == []
+
+    def test_add_stream_basic(self):
+        """Test creating a stream with positional compositions."""
+        factory = StreamFactory(["Water", "Acetone"], default_flow_type="mole")
+        stream = factory.add_stream("Feed", [0.65, 0.35], flow_rate=10.0)
+
+        assert stream.name == "Feed"
+        assert stream.flow_rate == 10.0
+        assert stream.flow_type == "mole"
+        assert stream.composition == {"Water": 0.65, "Acetone": 0.35}
+        assert "Feed" in factory.streams
+        assert factory.get_stream("Feed") == stream
+
+    def test_add_stream_with_none_composition(self):
+        """Test stream creation with one None composition (auto-calculated)."""
+        factory = StreamFactory(["Water", "Acetone"], default_flow_type="mole")
+        stream = factory.add_stream("Feed", [0.65, None], flow_rate=10.0)
+
+        assert stream.composition["Water"] == 0.65
+        assert np.isclose(stream.composition["Acetone"], 0.35)
+
+    def test_add_stream_duplicate_name_raises(self):
+        """Test that duplicate stream name raises ValueError."""
+        factory = StreamFactory(["Water", "Acetone"], default_flow_type="mole")
+        factory.add_stream("Feed", [0.65, 0.35], flow_rate=10.0)
+
+        with pytest.raises(ValueError, match="already registered"):
+            factory.add_stream("Feed", [0.25, 0.75], flow_rate=5.0)
+
+    def test_add_stream_wrong_composition_length_raises(self):
+        """Test that composition length mismatch raises ValueError."""
+        factory = StreamFactory(["Water", "Acetone"], default_flow_type="mole")
+
+        with pytest.raises(ValueError, match="Composition length"):
+            factory.add_stream("Feed", [0.65], flow_rate=10.0)
+
+        with pytest.raises(ValueError, match="Composition length"):
+            factory.add_stream("Feed", [0.65, 0.25, 0.1], flow_rate=10.0)
+
+    def test_add_stream_missing_flow_type_raises(self):
+        """Test that missing flow_type raises ValueError when no default."""
+        factory = StreamFactory(["Water", "Acetone"])
+        # No default_flow_type set
+
+        with pytest.raises(ValueError, match="flow_type must be provided"):
+            factory.add_stream("Feed", [0.65, 0.35], flow_rate=10.0)
+
+    def test_add_stream_override_flow_type(self):
+        """Test overriding default flow_type per stream."""
+        factory = StreamFactory(
+            ["Water", "Acetone"], default_flow_type="mole"
+        )
+        stream = factory.add_stream(
+            "Feed", [0.65, 0.35], flow_rate=10.0, flow_type="mass"
+        )
+
+        assert stream.flow_type == "mass"
+
+    def test_add_stream_with_output_direction(self):
+        """Test creating output streams with direction='output'."""
+        factory = StreamFactory(["Water", "Acetone"], default_flow_type="mole")
+        vapor = factory.add_stream("Vapor", [0.75, None], direction="output")
+
+        assert vapor.direction == "output"
+
+    def test_get_stream_unknown_name_raises(self):
+        """Test that retrieving unknown stream raises KeyError."""
+        factory = StreamFactory(["Water", "Acetone"], default_flow_type="mole")
+
+        with pytest.raises(KeyError):
+            factory.get_stream("NonExistent")
+
+    def test_add_ratio_valid_references(self):
+        """Test adding a ratio with valid stream references."""
+        from src.material_balances import FlowRatio
+
+        factory = StreamFactory(["Water", "Acetone"], default_flow_type="mole")
+        factory.add_stream("Feed", [0.65, 0.35], flow_rate=None)
+        factory.add_stream("Vapor", [0.75, None], flow_rate=None, direction="output")
+
+        ratio = FlowRatio("Feed", "Vapor", target_ratio=3.45)
+        returned_ratio = factory.add_ratio(ratio)
+
+        assert returned_ratio == ratio
+        assert ratio in factory.ratios
+
+    def test_add_ratio_invalid_stream_raises(self):
+        """Test that adding a ratio with unregistered stream raises ValueError."""
+        from src.material_balances import FlowRatio
+
+        factory = StreamFactory(["Water", "Acetone"], default_flow_type="mole")
+        factory.add_stream("Feed", [0.65, 0.35], flow_rate=10.0)
+
+        ratio = FlowRatio("Feed", "NonExistent", target_ratio=3.45)
+
+        with pytest.raises(ValueError, match="invalid references"):
+            factory.add_ratio(ratio)
+
+    def test_add_ratio_invalid_component_raises(self):
+        """Test that adding a ratio with unregistered component raises ValueError."""
+        from src.material_balances import CompositionRatio
+
+        factory = StreamFactory(["Water", "Acetone"], default_flow_type="mole")
+        factory.add_stream("Feed", [0.65, None], flow_rate=10.0)
+
+        ratio = CompositionRatio("Feed", "NonExistent", "Water", target_ratio=2.0)
+
+        with pytest.raises(ValueError, match="invalid references"):
+            factory.add_ratio(ratio)
+
+    def test_build_process_unit_simple_evaporator(self):
+        """Test building a solvable ProcessUnit for acetone/water evaporator."""
+        factory = StreamFactory(["Water", "Acetone"], default_flow_type="mole")
+        feed = factory.add_stream("Feed", [0.65, 0.35], flow_rate=10.0)
+        vapor = factory.add_stream("Vapor", [0.25, None], direction="output")
+        liquid = factory.add_stream("Liquid", [0.813, None], direction="output")
+
+        unit = factory.build_process_unit("H-101")
+
+        assert unit.name == "H-101"
+        assert feed in unit.input_streams
+        assert vapor in unit.output_streams
+        assert liquid in unit.output_streams
+        assert unit.is_solvable()
+
+        unit.solve_material_balances()
+        unit.print_report()
+
+    def test_build_process_unit_with_ratios(self):
+        """Test building a ProcessUnit that includes registered ratios."""
+        from src.material_balances import FlowRatio
+
+        factory = StreamFactory(
+            ["Solids", "Water"], default_flow_type="kg/h"
+        )
+        strawberry = factory.add_stream("Strawberry", [0.15, None], flow_rate=None)
+        sugar = factory.add_stream("Sugar", [1.0, 0.0], flow_rate=None)
+        jam = factory.add_stream("Jam", [0.66667, None], flow_rate=1000, direction="output")
+        water = factory.add_stream("Water", [0.0, 1.0], flow_rate=None, direction="output")
+
+        # Ratio: strawberry / sugar = 45/55
+        ratio = FlowRatio("Strawberry", "Sugar", target_ratio=45 / 55)
+        factory.add_ratio(ratio)
+
+        unit = factory.build_process_unit("H-102")
+
+        assert len(unit.ratios) == 1
+        assert unit.ratios[0] == ratio
+        assert unit.is_solvable()
+
+    def test_factory_streams_registry_isolation(self):
+        """Test that multiple factories maintain independent stream registries."""
+        factory1 = StreamFactory(["Water", "Acetone"], default_flow_type="mole")
+        factory2 = StreamFactory(
+            ["Ethanol", "Methanol"], default_flow_type="mole"
+        )
+
+        stream1 = factory1.add_stream("Stream", [0.5, 0.5], flow_rate=10.0)
+        stream2 = factory2.add_stream("Stream", [0.3, 0.7], flow_rate=20.0)
+
+        assert factory1.get_stream("Stream") == stream1
+        assert factory2.get_stream("Stream") == stream2
+        assert stream1 != stream2

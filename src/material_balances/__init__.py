@@ -12,14 +12,14 @@ Main components:
     - Solvers: Utility functions for solving specific material balance problems
 """
 
-from .components import Component
 from .process_unit import ProcessUnit
 from .ratio_constraints import ComponentFlowRatio, CompositionRatio, FlowRatio, Ratio
-from .stream import Stream
+from .stream import Component, Stream, StreamFactory
 
 __all__ = [
     "Component",
     "Stream",
+    "StreamFactory",
     "ProcessUnit",
     "Ratio",
     "FlowRatio",
