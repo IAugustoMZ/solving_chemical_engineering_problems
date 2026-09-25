@@ -121,7 +121,11 @@ class TestStream:
                 flow_rate=10.0,
                 flow_type="mole",
                 components=[water, acetone, ethanol],
-                composition={"Water": 0.7, "Acetone": 0.5, "Ethanol": None},  # sums to 1.2
+                composition={
+                    "Water": 0.7,
+                    "Acetone": 0.5,
+                    "Ethanol": None,
+                },  # sums to 1.2
             )
 
     def test_stream_validation_components_mismatch(self):
@@ -479,9 +483,7 @@ class TestStreamFactory:
 
     def test_add_stream_override_flow_type(self):
         """Test overriding default flow_type per stream."""
-        factory = StreamFactory(
-            ["Water", "Acetone"], default_flow_type="mole"
-        )
+        factory = StreamFactory(["Water", "Acetone"], default_flow_type="mole")
         stream = factory.add_stream(
             "Feed", [0.65, 0.35], flow_rate=10.0, flow_type="mass"
         )
@@ -508,7 +510,9 @@ class TestStreamFactory:
         factory.add_stream("Feed", [0.65, 0.35], flow_rate=None)
         factory.add_stream("Vapor", [0.75, None], flow_rate=None, direction="output")
 
-        returned_ratio = factory.add_ratio("flow", stream1="Feed", stream2="Vapor", target_ratio=3.45)
+        returned_ratio = factory.add_ratio(
+            "flow", stream1="Feed", stream2="Vapor", target_ratio=3.45
+        )
 
         assert returned_ratio is not None
         assert len(factory.ratios) == 1
@@ -520,7 +524,9 @@ class TestStreamFactory:
         factory.add_stream("Feed", [0.65, 0.35], flow_rate=10.0)
 
         with pytest.raises(ValueError, match="invalid references"):
-            factory.add_ratio("flow", stream1="Feed", stream2="NonExistent", target_ratio=3.45)
+            factory.add_ratio(
+                "flow", stream1="Feed", stream2="NonExistent", target_ratio=3.45
+            )
 
     def test_add_ratio_invalid_component_raises(self):
         """Test that adding a ratio with unregistered component raises ValueError."""
@@ -528,14 +534,26 @@ class TestStreamFactory:
         factory.add_stream("Feed", [0.65, None], flow_rate=10.0)
 
         with pytest.raises(ValueError, match="invalid references"):
-            factory.add_ratio("composition", stream="Feed", comp1="NonExistent", comp2="Water", target_ratio=2.0)
+            factory.add_ratio(
+                "composition",
+                stream="Feed",
+                comp1="NonExistent",
+                comp2="Water",
+                target_ratio=2.0,
+            )
 
     def test_add_ratio_composition_ratio(self):
         """Test adding a composition ratio (comp1 / comp2 in a stream)."""
         factory = StreamFactory(["Water", "Acetone"], default_flow_type="mole")
         factory.add_stream("Outlet", [None, 0.75], flow_rate=10.0)
 
-        ratio = factory.add_ratio("composition", stream="Outlet", comp1="Acetone", comp2="Water", target_ratio=3.0)
+        ratio = factory.add_ratio(
+            "composition",
+            stream="Outlet",
+            comp1="Acetone",
+            comp2="Water",
+            target_ratio=3.0,
+        )
 
         assert ratio is not None
         assert len(factory.ratios) == 1
@@ -564,7 +582,13 @@ class TestStreamFactory:
         factory.add_stream("Stream", [0.5, None])
 
         with pytest.raises(ValueError, match="Unknown ratio_type"):
-            factory.add_ratio("unknown_type", stream="Stream", comp1="Water", comp2="Acetone", target_ratio=1.0)
+            factory.add_ratio(
+                "unknown_type",
+                stream="Stream",
+                comp1="Water",
+                comp2="Acetone",
+                target_ratio=1.0,
+            )
 
     def test_build_process_unit_simple_evaporator(self):
         """Test building a solvable ProcessUnit for acetone/water evaporator."""
@@ -586,16 +610,20 @@ class TestStreamFactory:
 
     def test_build_process_unit_with_ratios(self):
         """Test building a ProcessUnit that includes registered ratios."""
-        factory = StreamFactory(
-            ["Solids", "Water"], default_flow_type="kg/h"
-        )
+        factory = StreamFactory(["Solids", "Water"], default_flow_type="kg/h")
         strawberry = factory.add_stream("Strawberry", [0.15, None], flow_rate=None)
         sugar = factory.add_stream("Sugar", [1.0, 0.0], flow_rate=None)
-        jam = factory.add_stream("Jam", [0.66667, None], flow_rate=1000, direction="output")
-        water = factory.add_stream("Water", [0.0, 1.0], flow_rate=None, direction="output")
+        jam = factory.add_stream(
+            "Jam", [0.66667, None], flow_rate=1000, direction="output"
+        )
+        water = factory.add_stream(
+            "Water", [0.0, 1.0], flow_rate=None, direction="output"
+        )
 
         # Ratio: strawberry / sugar = 45/55
-        factory.add_ratio("flow", stream1="Strawberry", stream2="Sugar", target_ratio=45 / 55)
+        factory.add_ratio(
+            "flow", stream1="Strawberry", stream2="Sugar", target_ratio=45 / 55
+        )
 
         unit = factory.build_process_unit("H-102")
 
@@ -606,9 +634,7 @@ class TestStreamFactory:
     def test_factory_streams_registry_isolation(self):
         """Test that multiple factories maintain independent stream registries."""
         factory1 = StreamFactory(["Water", "Acetone"], default_flow_type="mole")
-        factory2 = StreamFactory(
-            ["Ethanol", "Methanol"], default_flow_type="mole"
-        )
+        factory2 = StreamFactory(["Ethanol", "Methanol"], default_flow_type="mole")
 
         stream1 = factory1.add_stream("Stream", [0.5, 0.5], flow_rate=10.0)
         stream2 = factory2.add_stream("Stream", [0.3, 0.7], flow_rate=20.0)
@@ -658,8 +684,7 @@ class TestMultipleNoneCompositions:
     def test_process_unit_with_multiple_none_compositions(self):
         """Test system with multiple unknown compositions is solvable."""
         factory = StreamFactory(
-            ["Methanol", "Ethanol", "Water"],
-            default_flow_type="kg/h"
+            ["Methanol", "Ethanol", "Water"], default_flow_type="kg/h"
         )
 
         # Feed with 2 known compositions
@@ -678,8 +703,7 @@ class TestMultipleNoneCompositions:
     def test_solve_system_with_multiple_none_compositions(self):
         """Test that solver correctly handles multiple None compositions."""
         factory = StreamFactory(
-            ["Methanol", "Ethanol", "Water"],
-            default_flow_type="kg/h"
+            ["Methanol", "Ethanol", "Water"], default_flow_type="kg/h"
         )
 
         factory.add_stream("Feed", [0.25, 0.425, None], flow_rate=1)
@@ -706,22 +730,16 @@ class TestMultipleNoneCompositions:
 
         # Stream with 1 unknown composition
         feed = Stream(
-            "feed", 10.0, "mole",
-            [water, acetone],
-            {"Water": 0.65, "Acetone": None}
+            "feed", 10.0, "mole", [water, acetone], {"Water": 0.65, "Acetone": None}
         )
 
         # Streams with 1 unknown flow rate and unknown compositions
         vapor = Stream(
-            "vapor", None, "mole",
-            [water, acetone],
-            {"Water": 0.75, "Acetone": None}
+            "vapor", None, "mole", [water, acetone], {"Water": 0.75, "Acetone": None}
         )
 
         liquid = Stream(
-            "liquid", None, "mole",
-            [water, acetone],
-            {"Water": 0.187, "Acetone": None}
+            "liquid", None, "mole", [water, acetone], {"Water": 0.187, "Acetone": None}
         )
 
         unit = ProcessUnit("Evaporator", [feed], [vapor, liquid])
@@ -741,16 +759,20 @@ class TestMultipleNoneCompositions:
 
         # Feed: all compositions known
         feed = Stream(
-            "feed", 10.0, "mole",
+            "feed",
+            10.0,
+            "mole",
             [water, ethanol, methanol],
-            {"Water": 0.5, "Ethanol": 0.3, "Methanol": 0.2}
+            {"Water": 0.5, "Ethanol": 0.3, "Methanol": 0.2},
         )
 
         # Product: 2 unknown compositions
         product = Stream(
-            "product", None, "mole",
+            "product",
+            None,
+            "mole",
             [water, ethanol, methanol],
-            {"Water": None, "Ethanol": None, "Methanol": 0.1}
+            {"Water": None, "Ethanol": None, "Methanol": 0.1},
         )
 
         unit = ProcessUnit("Separator", [feed], [product])
@@ -777,6 +799,6 @@ class TestMultipleNoneCompositions:
                 composition={
                     "Water": 0.6,
                     "Ethanol": 0.5,  # 0.6 + 0.5 = 1.1 > 1.0
-                    "Methanol": None
+                    "Methanol": None,
                 },
             )

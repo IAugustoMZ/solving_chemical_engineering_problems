@@ -154,7 +154,8 @@ class ProcessUnit:
             ...     evap.solve_material_balances()
         """
         num_composition_constraints = sum(
-            1 for stream in self.input_streams + self.output_streams
+            1
+            for stream in self.input_streams + self.output_streams
             if any(v is None for v in stream.composition.values())
         )
         dof = (
@@ -174,7 +175,8 @@ class ProcessUnit:
         system is solvable or not.
         """
         num_composition_constraints = sum(
-            1 for stream in self.input_streams + self.output_streams
+            1
+            for stream in self.input_streams + self.output_streams
             if any(v is None for v in stream.composition.values())
         )
         dof = (
@@ -186,17 +188,23 @@ class ProcessUnit:
 
         print(f"\nDegrees of Freedom Analysis for '{self.name}':")
         print(f"  Unknowns (flow rates + compositions): {self.unknowns}")
-        print(f"  Independent material balance equations: {self.independent_material_balances}")
+        print(
+            f"  Independent material balance equations: {self.independent_material_balances}"
+        )
         print(f"  Composition sum constraints: {num_composition_constraints}")
         print(f"  Ratio constraints: {len(self.ratios)}")
         print(f"  Degrees of freedom: {dof}")
 
         if dof > 0:
-            print(f"  Status: UNDERDETERMINED (need to provide {dof} more value{'s' if dof != 1 else ''})")
+            print(
+                f"  Status: UNDERDETERMINED (need to provide {dof} more value{'s' if dof != 1 else ''})"
+            )
         elif dof == 0:
             print(f"  Status: SOLVABLE (exactly determined)")
         else:  # dof < 0
-            print(f"  Status: OVERDETERMINED (system has {-dof} conflicting constraint{'s' if dof != -1 else ''})")
+            print(
+                f"  Status: OVERDETERMINED (system has {-dof} conflicting constraint{'s' if dof != -1 else ''})"
+            )
 
     def suggest_missing_information(self) -> None:
         """
@@ -367,7 +375,8 @@ class ProcessUnit:
         # Pre-identify streams that need composition sum constraints
         # (those with at least one unknown composition)
         self._streams_needing_composition_constraint = [
-            stream for stream in self.input_streams + self.output_streams
+            stream
+            for stream in self.input_streams + self.output_streams
             if any(v is None for v in stream.composition.values())
         ]
 

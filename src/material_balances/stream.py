@@ -185,9 +185,7 @@ class StreamFactory:
         >>> unit = factory.build_process_unit("Evaporator")
     """
 
-    def __init__(
-        self, component_names: list, default_flow_type: str = None
-    ) -> None:
+    def __init__(self, component_names: list, default_flow_type: str = None) -> None:
         """
         Initialize a StreamFactory with a shared component list.
 
@@ -245,9 +243,7 @@ class StreamFactory:
             >>> vapor = factory.add_stream("Vapor", [0.25, None], direction="output")
         """
         if name in self.streams:
-            raise ValueError(
-                f"Stream '{name}' is already registered in this factory."
-            )
+            raise ValueError(f"Stream '{name}' is already registered in this factory.")
 
         if len(compositions) != len(self.components):
             raise ValueError(
@@ -367,9 +363,7 @@ class StreamFactory:
         try:
             ratio.validate_references(self.streams)
         except (KeyError, ValueError) as e:
-            raise ValueError(
-                f"Ratio ({ratio.description}) has invalid references: {e}"
-            )
+            raise ValueError(f"Ratio ({ratio.description}) has invalid references: {e}")
 
         self.ratios.append(ratio)
         return ratio
@@ -397,12 +391,8 @@ class StreamFactory:
         """
         from .process_unit import ProcessUnit
 
-        input_streams = [
-            s for s in self.streams.values() if s.direction == "input"
-        ]
-        output_streams = [
-            s for s in self.streams.values() if s.direction == "output"
-        ]
+        input_streams = [s for s in self.streams.values() if s.direction == "input"]
+        output_streams = [s for s in self.streams.values() if s.direction == "output"]
 
         return ProcessUnit(
             name=name,
