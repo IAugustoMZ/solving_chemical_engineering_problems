@@ -220,7 +220,17 @@ class ProcessUnit:
             )
             return
 
-        dof = self.unknowns - self.independent_material_balances - len(self.ratios)
+        num_composition_constraints = sum(
+            1
+            for stream in self.input_streams + self.output_streams
+            if any(v is None for v in stream.composition.values())
+        )
+        dof = (
+            self.unknowns
+            - self.independent_material_balances
+            - len(self.ratios)
+            - num_composition_constraints
+        )
 
         if dof > 0:
             print(

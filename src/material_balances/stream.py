@@ -156,6 +156,14 @@ class Stream:
                     "(missing values must sum to a non-negative amount)."
                 )
 
+            # Auto-calculate single missing composition as 1 - sum(known)
+            none_count = list(self.composition.values()).count(None)
+            if none_count == 1:
+                for key, value in self.composition.items():
+                    if value is None:
+                        self.composition[key] = 1.0 - specified_sum
+                        break
+
 
 class StreamFactory:
     """

@@ -69,8 +69,8 @@ class TestStream:
         )
         assert stream.flow_rate is None
 
-    def test_stream_single_none_composition_not_auto_calculated(self):
-        """Test that None composition values remain None (not auto-calculated)."""
+    def test_stream_single_none_composition_auto_calculated(self):
+        """Test that single missing composition is auto-calculated as 1 - sum(known)."""
         water = Component("Water")
         acetone = Component("Acetone")
         stream = Stream(
@@ -80,7 +80,7 @@ class TestStream:
             components=[water, acetone],
             composition={"Water": 0.65, "Acetone": None},
         )
-        assert stream.composition["Acetone"] is None
+        assert np.isclose(stream.composition["Acetone"], 0.35)
 
     def test_stream_single_none_composition_constraint(self):
         """Test that stream with one None composition still enforces sum-to-1 constraint."""
@@ -285,9 +285,9 @@ class TestProcessUnit:
         unit = ProcessUnit("Evaporator", [feed], [vapor, liquid])
         # 2 components = 2 independent material balances
         assert unit.independent_material_balances == 2
-        # 3 unknown compositions (one per stream) + 2 unknown flow rates = 5 unknowns
-        assert unit.unknowns == 5
-        # 5 unknowns = 2 material balances + 3 composition sum constraints, so solvable
+        # All compositions are auto-calculated; only 2 unknown flow rates
+        assert unit.unknowns == 2
+        # 2 unknowns = 2 material balances, so solvable
         assert unit.is_solvable()
 
     def test_process_unit_is_solvable_true(self):
@@ -696,8 +696,9 @@ class TestMultipleNoneCompositions:
 
         unit = factory.build_process_unit("Unit")
 
-        # DOF = 6 unknowns - 3 material balances - 3 composition constraints = 0
-        assert unit.unknowns == 6
+        # Single-None compositions are auto-calculated; only Out2 has unknown compositions
+        # DOF = 4 unknowns - 3 material balances - 1 composition constraint = 0
+        assert unit.unknowns == 4
         assert unit.is_solvable()
 
     def test_solve_system_with_multiple_none_compositions(self):
@@ -727,28 +728,32 @@ class TestMultipleNoneCompositions:
         """Test that composition sum constraints are counted in DOF."""
         water = Component("Water")
         acetone = Component("Acetone")
+        ethanol = Component("Ethanol")
 
-        # Stream with 1 unknown composition
+        # Feed with 2 unknown compositions (no auto-calc when multiple unknowns)
         feed = Stream(
-            "feed", 10.0, "mole", [water, acetone], {"Water": 0.65, "Acetone": None}
+            "feed", 10.0, "mole", [water, acetone, ethanol],
+            {"Water": 0.5, "Acetone": None, "Ethanol": None}
         )
 
-        # Streams with 1 unknown flow rate and unknown compositions
+        # Streams with 1 unknown flow rate and 2 unknown compositions
         vapor = Stream(
-            "vapor", None, "mole", [water, acetone], {"Water": 0.75, "Acetone": None}
+            "vapor", None, "mole", [water, acetone, ethanol],
+            {"Water": 0.3, "Acetone": None, "Ethanol": None}
         )
 
         liquid = Stream(
-            "liquid", None, "mole", [water, acetone], {"Water": 0.187, "Acetone": None}
+            "liquid", None, "mole", [water, acetone, ethanol],
+            {"Water": 0.4, "Acetone": None, "Ethanol": None}
         )
 
         unit = ProcessUnit("Evaporator", [feed], [vapor, liquid])
 
-        # 5 unknowns (3 compositions + 2 flow rates)
-        # 2 material balance equations
+        # 6 unknowns (4 compositions + 2 flow rates)
+        # 3 material balance equations
         # 3 composition sum constraints (one per stream with unknown compositions)
-        # DOF = 5 - 2 - 3 = 0
-        assert unit.unknowns == 5
+        # DOF = 6 - 3 - 3 = 0
+        assert unit.unknowns == 6
         assert unit.is_solvable()
 
     def test_three_component_system_with_multiple_unknowns_per_stream(self):
