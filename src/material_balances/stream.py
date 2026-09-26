@@ -296,14 +296,16 @@ class StreamFactory:
         Create and register a ratio constraint from raw parameters.
 
         The factory automatically instantiates the appropriate Ratio subclass
-        (FlowRatio, CompositionRatio, or ComponentFlowRatio) based on ratio_type
-        and validates that all referenced streams and components are registered.
+        (FlowRatio, CompositionRatio, ComponentFlowRatio, or ComponentFlowValue)
+        based on ratio_type and validates that all referenced streams and
+        components are registered.
 
         Parameters:
             ratio_type (str): Type of ratio constraint. Options:
                 - "flow": FlowRatio between two stream flow rates
                 - "composition": CompositionRatio between two component compositions
                 - "component_flow": ComponentFlowRatio between component flows
+                - "component_flow_value": ComponentFlowValue for known absolute component flow
 
                 Defaults to "flow".
 
@@ -320,6 +322,10 @@ class StreamFactory:
                     >>> factory.add_ratio("component_flow", stream1="Strawberry", comp1="Solids",
                     ...                  stream2="Sugar", comp2="Sugar", target_ratio=0.45)
 
+                For "component_flow_value": stream, comp, target_value
+                    >>> factory.add_ratio("component_flow_value", stream="Product", comp="Solids",
+                    ...                  target_value=500.0)
+
         Returns:
             Ratio: The newly created and registered Ratio object.
 
@@ -333,7 +339,12 @@ class StreamFactory:
             >>> vapor = factory.add_stream("Vapor", [0.25, None], direction="output")
             >>> factory.add_ratio("flow", stream1="Feed", stream2="Vapor", target_ratio=3.45)
         """
-        from .ratio_constraints import ComponentFlowRatio, CompositionRatio, FlowRatio
+        from .ratio_constraints import (
+            ComponentFlowRatio,
+            ComponentFlowValue,
+            CompositionRatio,
+            FlowRatio,
+        )
 
         if ratio_type == "flow":
             ratio = FlowRatio(
@@ -354,10 +365,14 @@ class StreamFactory:
                 kwargs["comp2"],
                 kwargs["target_ratio"],
             )
+        elif ratio_type == "component_flow_value":
+            ratio = ComponentFlowValue(
+                kwargs["stream"], kwargs["comp"], kwargs["target_value"]
+            )
         else:
             raise ValueError(
                 f"Unknown ratio_type '{ratio_type}'. "
-                f"Choose from: 'flow', 'composition', 'component_flow'."
+                f"Choose from: 'flow', 'composition', 'component_flow', 'component_flow_value'."
             )
 
         try:

@@ -251,3 +251,58 @@ class CompositionRatio(Ratio):
             f"{self.stream_name}.x_{self.comp1_name} / "
             f"{self.stream_name}.x_{self.comp2_name} = {self.target_ratio}"
         )
+
+
+class ComponentFlowValue(Ratio):
+    """
+    Represents a known absolute flow rate of one component within a stream.
+
+    Constraint: stream.flow_rate × stream.composition[comp_name] = target_value
+
+    Use when a stream's composition is known but its total flow rate is not,
+    and the absolute flow of one component is known instead (e.g., a required
+    production rate of a specific component).
+
+    Example:
+        >>> ratio = ComponentFlowValue("Product", "Solids", target_value=500.0)
+        >>> # Constraint: F_product × x_solids = 500.0 (e.g., 500 kg/h of Solids)
+    """
+
+    def __init__(self, stream_name, comp_name, target_value):
+        """
+        Initialize a component flow value constraint.
+
+        Parameters:
+            stream_name (str): Name of the stream.
+            comp_name (str): Name of the component.
+            target_value (float): Target absolute flow rate of the component.
+        """
+        self.stream_name = stream_name
+        self.comp_name = comp_name
+        self.target_value = target_value
+
+    def compute_residual(self, streams_dict):
+        """Compute (F × x_comp) - target_value."""
+        stream = streams_dict[self.stream_name]
+        actual_value = stream.flow_rate * stream.composition[self.comp_name]
+        return actual_value - self.target_value
+
+    def validate_references(self, streams_dict):
+        """Verify stream and component exist."""
+        if self.stream_name not in streams_dict:
+            raise KeyError(f"Stream '{self.stream_name}' not found")
+
+        stream = streams_dict[self.stream_name]
+
+        if self.comp_name not in stream.composition:
+            raise KeyError(
+                f"Component '{self.comp_name}' not in stream '{self.stream_name}'"
+            )
+
+    @property
+    def description(self):
+        """Return constraint description."""
+        return (
+            f"ComponentFlowValue: {self.stream_name}.F × "
+            f"{self.stream_name}.x_{self.comp_name} = {self.target_value}"
+        )
