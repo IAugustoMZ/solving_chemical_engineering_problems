@@ -49,3 +49,6 @@ venv.bak/
 *~
 .DS_Store
 
+
+# Video explanation documentation (local reference only)
+docs/video_explanations/
