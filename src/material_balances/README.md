@@ -15,33 +15,44 @@ Represents a chemical species or component (e.g., water, acetone, sugar).
 ```python
 from src.material_balances import Component
 
-water = Component("Water")
-acetone = Component("Acetone")
+water = Component("Water", molar_mass=18.015)
+acetone = Component("Acetone", molar_mass=58.08)
 ```
+
+Molar masses are optional for single-basis balances and are required only for
+components that participate in a mass/molar conversion. If a balance can be
+solved on one basis with partial molar-mass data, the solver reports that basis
+and leaves non-derivable results on the other basis blank.
 
 ### Stream
 
 Represents a flow of material with specified flow rate and composition.
 
 **Key Features:**
-- Supports mass, molar, or volumetric flow rates
-- Automatic calculation of missing composition values (when exactly one is unknown)
-- Validates that composition fractions sum to 1.0
+- Keeps the flow-rate basis separate from the composition basis
+- Converts mass and molar flow rates and fractions when component molar masses are available
+- Allows mixed inputs such as a mass flow rate with mole fractions
+- Automatically fills the final missing fraction when the other fractions sum to at most 1
+- Validates fractions and input consistency
 - Bidirectional (input/output) designation
 
 ```python
 from src.material_balances import Stream, Component
 
-water = Component("Water")
-acetone = Component("Acetone")
+water = Component("Water", molar_mass=18.015)
+acetone = Component("Acetone", molar_mass=58.08)
 
 feed = Stream(
     name="evaporator_feed",
-    flow_rate=10.0,  # Can be None if unknown
-    flow_type="mole",
+    flow_rate=100.0,
+    flow_type="kg/h",
     components=[water, acetone],
-    composition={"Water": 0.65, "Acetone": None}  # Automatically calculates Acetone = 0.35
+    composition={"Water": 0.65, "Acetone": 0.35},
+    composition_basis="molar",
 )
+
+feed.molar_flow_rate
+feed.mass_fractions
 ```
 
 ### ProcessUnit
@@ -53,9 +64,11 @@ Represents a piece of equipment with inlet and outlet streams. Performs material
 - Calculates independent material balance equations (= number of components)
 - Counts unknowns (None flow rates and compositions)
 - Incorporates optional ratio constraints to reduce DOF
-- Determines if system is solvable (unknowns ≤ equations + ratios)
-- Solves material balances using scipy's least_squares optimizer
-- Generates detailed balance reports with residual checks
+- Assembles mass- or molar-basis component balances and stream constraints
+- Checks structural solvability from the independent constraint rank
+- Solves balances with SciPy's `linprog`
+- Reconciles every specified flow and fraction before updating streams
+- Returns separate mass-basis and molar-basis flow and fraction rows when derivable
 
 ```python
 from src.material_balances import ProcessUnit, FlowRatio
@@ -127,6 +140,81 @@ print(f"Independent material balances: {evaporator.independent_material_balances
 evaporator.solve_material_balances()
 evaporator.print_report()
 ```
+
+### Degree-of-freedom reports
+
+`report_degrees_of_freedom()` prints each unknown stream field, every
+component-flow variable (including the selected mass or molar basis), and a
+rank-increasing list of independent constraints. This makes it clear which
+stream specifications determine the reported structural rank.
+
+```text
+Unknown input fields (flows + fractions): 2
+  - Stream 'CarryGas': flow rate
+  - Stream 'Mixture': flow rate
+Component-flow variables (molar basis): 6
+  1. Stream 'CarryGas': 'CO2'
+  2. Stream 'CarryGas': 'others'
+Independent constraint rank: 6
+```
+
+## Mass and Molar Basis Handling
+
+Use `molar_mass` on each component and set `composition_basis` independently
+from `flow_type`. Flow units and molar-mass units must be compatible. For
+example, `kg/h` with molar masses in `kg/kmol` yields `kmol/h`.
+
+```python
+from src.material_balances import StreamFactory
+
+factory = StreamFactory(
+    ["Methanol", "Water"],
+    default_flow_type="kg/h",
+    molar_masses={"Methanol": 32.04, "Water": 18.015},
+)
+feed = factory.add_stream(
+    "Feed", [0.5, 0.5], flow_rate=100.0, composition_basis="molar"
+)
+product = factory.add_stream(
+    "Product", [0.5, 0.5], flow_type="kmol/h",
+    composition_basis="molar", direction="output",
+)
+unit = factory.build_process_unit("Transfer")
+results = unit.solve_material_balances()
+```
+
+`molar_masses` may also be a positional list aligned with the component names;
+use `None` for a component whose molar mass is unavailable:
+
+```python
+factory = StreamFactory(
+    ["CO2", "Carrier gas"],
+    default_flow_type="kmol/min",
+    molar_masses=[44.01, None],
+)
+```
+
+The returned dataframe separates every flow into `mass_flow_rate` or
+`molar_flow_rate`, and every component flow into
+`component_mass_flow_rate` or `component_molar_flow_rate`. It likewise uses
+`mass_fraction` and `mole_fraction`; there are no native-basis rows that mix
+mass and molar values across streams. A derived value is blank when its
+conversion cannot be determined from the supplied molar masses. For example,
+a pure CO2 tracer specified in kg/min can be converted and used in a molar
+balance with only CO2's molar mass; total mass flows remain unavailable when
+the carrier-gas molar mass is not supplied.
+
+Ratio constraints that compare total or component flow rates can accept
+`basis="mass"` or `basis="molar"`. If omitted, flow ratios use the process
+unit's selected balance basis; component-flow values use the referenced
+stream's flow basis.
+
+## Continuous integration
+
+The GitHub Actions quality and test workflows run for pull requests targeting
+`main`. They install the Poetry environment, then check Black formatting,
+isort imports, selected Flake8 errors, Pylint errors, the full pytest suite,
+and test coverage.
 
 ## Ratio Constraints
 
@@ -233,43 +321,32 @@ heater.print_report()
 
 ## Degree of Freedom Analysis (with Ratio Constraints)
 
-The module automatically performs DOF analysis accounting for all constraints:
-
-**Degrees of Freedom = Unknowns - Independent Material Balance Equations - Number of Independent Ratios**
-
-Where:
-- **Independent Material Balance Equations** = Number of unique components
-- **Unknowns** = Number of None values in all stream flow rates and compositions
-- **Number of Independent Ratios** = Count of ratio constraints (each reduces DOF by 1)
-
-System is **solvable** when: **DOF ≤ 0** (i.e., unknowns ≤ equations + ratios)
-
-### Example: Splitter with Flow Ratio
-
-- Single component: 1 independent material balance
-- Two output streams with unknown flow rates: 2 unknowns
-- Without ratio: DOF = 2 - 1 = 1 → Not solvable ✗
-- **With FlowRatio constraint**: DOF = 2 - 1 - 1 = 0 → Solvable ✓
+Solvability is assessed from the rank of the assembled component-flow
+constraints. The system is structurally determined when this rank equals the
+number of component-flow variables. Feasibility and consistency of all supplied
+values are checked by `solve_material_balances()`.
 
 ## Validation and Error Handling
 
 The module includes extensive validation:
 
 1. **Stream Composition**: Must sum to 1.0 when all specified
-2. **Component Mismatch**: At most one composition value per stream can be None
-3. **Stream Consistency**: All inlet and outlet streams must contain identical components
-4. **Solvability**: System must have enough equations for unknowns
+2. **Composition Basis**: Must be `mass` or `molar` for material balances
+3. **Molar Mass**: Must be positive and supplied for components whose mass/molar conversion is needed
+4. **Stream Consistency**: All inlet and outlet streams must contain identical components
+5. **Solvability**: Constraints must determine a unique nonnegative component-flow solution
 
 All errors raise informative exceptions with clear messages.
 
 ## Solver Details
 
-Material balance solving uses scipy's `least_squares` optimizer:
-
-- **Objective**: Minimize sum of squared residuals from material balance equations
-- **Constraints**: All flow rates and compositions constrained to [0, ∞]
-- **Convergence**: Automatically checks success and reports failures
-- **Tolerance**: Default mass balance residual tolerance = 1e-6
+Material balance solving uses SciPy's `linprog` with component flow rates as
+nonnegative decision variables. Material balances, known stream flows and
+compositions, and supported ratio constraints are represented as linear
+equalities. This removes the need for nonlinear initial guesses. The solver
+rejects infeasible or non-unique systems, checks balance residuals before
+updating streams, and uses a default absolute material-balance tolerance of
+1e-6.
 
 ## Test Suite
 

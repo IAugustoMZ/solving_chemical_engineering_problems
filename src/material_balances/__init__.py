@@ -13,7 +13,13 @@ Main components:
 """
 
 from .process_unit import ProcessUnit
-from .ratio_constraints import ComponentFlowRatio, CompositionRatio, FlowRatio, Ratio
+from .ratio_constraints import (
+    ComponentFlowRatio,
+    ComponentFlowValue,
+    CompositionRatio,
+    FlowRatio,
+    Ratio,
+)
 from .stream import Component, Stream, StreamFactory
 
 __all__ = [
@@ -24,6 +30,7 @@ __all__ = [
     "Ratio",
     "FlowRatio",
     "ComponentFlowRatio",
+    "ComponentFlowValue",
     "CompositionRatio",
 ]
 
