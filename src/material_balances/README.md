@@ -209,6 +209,13 @@ Ratio constraints that compare total or component flow rates can accept
 unit's selected balance basis; component-flow values use the referenced
 stream's flow basis.
 
+## Continuous integration
+
+The GitHub Actions quality and test workflows run for pull requests targeting
+`main`. They install the Poetry environment, then check Black formatting,
+isort imports, selected Flake8 errors, Pylint errors, the full pytest suite,
+and test coverage.
+
 ## Ratio Constraints
 
 The module supports optional algebraic constraints that represent independent relationships between streams or components, reducing the system's degrees of freedom.

@@ -133,7 +133,13 @@ class ComponentFlowRatio(Ratio):
     """
 
     def __init__(
-        self, stream1_name, comp1_name, stream2_name, comp2_name, target_ratio, basis=None
+        self,
+        stream1_name,
+        comp1_name,
+        stream2_name,
+        comp2_name,
+        target_ratio,
+        basis=None,
     ):
         """
         Initialize a component flow rate ratio constraint.
@@ -304,7 +310,9 @@ class ComponentFlowValue(Ratio):
         if basis == "mass":
             actual_value = stream.mass_flow_rate * stream.mass_fractions[self.comp_name]
         elif basis == "molar":
-            actual_value = stream.molar_flow_rate * stream.mole_fractions[self.comp_name]
+            actual_value = (
+                stream.molar_flow_rate * stream.mole_fractions[self.comp_name]
+            )
         else:
             actual_value = stream.flow_rate * stream.composition[self.comp_name]
         return actual_value - self.target_value
