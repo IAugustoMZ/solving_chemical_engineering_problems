@@ -80,6 +80,7 @@ class ProcessUnit:
         self._validate_stream_components()
         self._select_solver_basis()
         self._validate_ratio_references()
+        self._validate_molar_mass_requirements()
         self.calculate_independent_material_balances()
         self.calculate_unknowns()
 
@@ -109,7 +110,11 @@ class ProcessUnit:
             for component in stream.components:
                 if component.name in molar_masses:
                     known = molar_masses[component.name]
-                    if known is not None and component.molar_mass is not None and not np.isclose(known, component.molar_mass):
+                    if (
+                        known is not None
+                        and component.molar_mass is not None
+                        and not np.isclose(known, component.molar_mass)
+                    ):
                         raise ValueError(
                             f"Component '{component.name}' has inconsistent molar masses across streams."
                         )
@@ -132,36 +137,31 @@ class ProcessUnit:
             self.solver_basis = next(iter(bases))
         else:
             self.solver_basis = "molar"
-        if self.solver_basis == "molar" and needs_conversion:
-            missing = [
-                component.name
-                for stream in streams
-                for component in stream.components
-                if component.molar_mass is None
-            ]
-            if missing:
-                raise ValueError(
-                    "Molar masses are required to reconcile mass and molar data; "
-                    f"missing for: {', '.join(sorted(set(missing)))}."
-                )
-        if self.solver_basis == "molar" and len(bases) > 1 and any(
-            component.molar_mass is None
-            for stream in streams
-            for component in stream.components
-        ):
-            raise ValueError(
-                "Molar masses are required when a process unit mixes mass and molar flows."
-            )
         for ratio in self.ratios:
             if isinstance(ratio, (FlowRatio, ComponentFlowRatio)):
                 ratio.resolved_basis = ratio.basis or self.solver_basis
             elif isinstance(ratio, ComponentFlowValue):
-                stream = next(
-                    (s for s in streams if s.name == ratio.stream_name), None
-                )
+                stream = next((s for s in streams if s.name == ratio.stream_name), None)
                 ratio.resolved_basis = ratio.basis or (
                     stream.flow_basis if stream is not None else self.solver_basis
                 )
+
+    def _validate_molar_mass_requirements(self) -> None:
+        """Validate only conversions that occur in the assembled equations.
+
+        Components declared at zero fraction do not participate in a
+        cross-basis conversion. This allows a pure, mass-specified tracer to
+        be used in an otherwise molar balance without requiring molar masses
+        for inert carrier components.
+        """
+        component_names = sorted(
+            {
+                component.name
+                for stream in self.input_streams + self.output_streams
+                for component in stream.components
+            }
+        )
+        self._build_component_flow_system(component_names)
 
     def _validate_ratio_references(self) -> None:
         """
@@ -220,29 +220,60 @@ class ProcessUnit:
         _, matrix, _, _ = self._build_component_flow_system(names)
         row_scales = np.maximum(np.max(np.abs(matrix), axis=1), 1.0)
         rank = np.linalg.matrix_rank(matrix / row_scales[:, np.newaxis])
-        return rank == len(streams) * len(names)
+        return bool(rank == len(streams) * len(names))
 
     def report_degrees_of_freedom(self) -> None:
-        """Report structural degrees of freedom using the assembled constraints."""
+        """Report structural degrees of freedom and their defining specifications."""
         streams = self.input_streams + self.output_streams
         component_names = sorted(
             {component.name for stream in streams for component in stream.components}
         )
-        _, matrix, _, _ = self._build_component_flow_system(component_names)
-        variables = len(streams) * len(component_names)
+        variable_refs, matrix, _, labels = self._build_component_flow_system(
+            component_names
+        )
+        variables = len(variable_refs)
         row_scales = np.maximum(np.max(np.abs(matrix), axis=1), 1.0)
-        rank = np.linalg.matrix_rank(matrix / row_scales[:, np.newaxis])
+        normalized_matrix = matrix / row_scales[:, np.newaxis]
+        rank = np.linalg.matrix_rank(normalized_matrix)
         dof = variables - rank
+
+        # Select a readable row basis in the same order constraints are assembled.
+        # Each selected label raises the rank by one; omitted constraints are
+        # linearly dependent on the preceding selected constraints.
+        independent_labels = []
+        independent_rows = np.empty((0, variables))
+        independent_rank = 0
+        for row, label in zip(normalized_matrix, labels):
+            candidate_rows = np.vstack((independent_rows, row))
+            candidate_rank = np.linalg.matrix_rank(candidate_rows)
+            if candidate_rank > independent_rank:
+                independent_labels.append(label)
+                independent_rows = candidate_rows
+                independent_rank = candidate_rank
 
         print(f"\nDegrees of Freedom Analysis for '{self.name}':")
         print(f"  Unknown input fields (flows + fractions): {self.unknowns}")
-        print(f"  Component-flow variables: {variables}")
+        for stream, kind, component_name in self._collect_unknowns():
+            if kind == "flow_rate":
+                description = "flow rate"
+            else:
+                description = (
+                    f"{stream.composition_basis} fraction of '{component_name}'"
+                )
+            print(f"    - Stream '{stream.name}': {description}")
+        print(f"  Component-flow variables ({self.solver_basis} basis): {variables}")
+        for index, (stream, component_name) in enumerate(variable_refs, start=1):
+            print(f"    {index}. Stream '{stream.name}': '{component_name}'")
         print(f"  Independent constraint rank: {rank}")
+        for index, label in enumerate(independent_labels, start=1):
+            print(f"    {index}. {label}")
         print(f"  Structural degrees of freedom: {dof}")
         if dof > 0:
             print(f"  Status: UNDERDETERMINED (need {dof} independent constraint(s))")
         else:
-            print("  Status: STRUCTURALLY DETERMINED (feasibility is checked when solving)")
+            print(
+                "  Status: STRUCTURALLY DETERMINED (feasibility is checked when solving)"
+            )
 
     def suggest_missing_information(self) -> None:
         """Print missing stream values when the assembled constraints are underdetermined."""
@@ -252,14 +283,20 @@ class ProcessUnit:
                 "Run solve_material_balances() to check feasibility."
             )
             return
-        print("The process unit is structurally underdetermined. Possible missing values:")
+        print(
+            "The process unit is structurally underdetermined. Possible missing values:"
+        )
         for stream in self.input_streams + self.output_streams:
             if stream.flow_rate is None:
                 print(f"  - Stream '{stream.name}': flow rate")
             for component_name, value in stream.composition.items():
                 if value is None:
-                    print(f"  - Stream '{stream.name}': composition for '{component_name}'")
-        print("Some listed values may be dependent; provide enough independent information.")
+                    print(
+                        f"  - Stream '{stream.name}': composition for '{component_name}'"
+                    )
+        print(
+            "Some listed values may be dependent; provide enough independent information."
+        )
 
     def _collect_unknowns(self) -> list:
         """
@@ -281,7 +318,9 @@ class ProcessUnit:
     def _build_component_flow_system(self, component_names: list):
         """Build linear equalities using a common mass or molar component-flow basis."""
         streams = self.input_streams + self.output_streams
-        variable_refs = [(stream, name) for stream in streams for name in component_names]
+        variable_refs = [
+            (stream, name) for stream in streams for name in component_names
+        ]
         variable_index = {ref: i for i, ref in enumerate(variable_refs)}
         rows, targets, labels = [], [], []
 
@@ -294,7 +333,18 @@ class ProcessUnit:
             labels.append(label)
 
         def molecular_weight(stream, component_name):
-            return next(c.molar_mass for c in stream.components if c.name == component_name)
+            return next(
+                c.molar_mass for c in stream.components if c.name == component_name
+            )
+
+        def is_known_zero_component(stream, component_name):
+            if stream.composition.get(component_name) == 0:
+                return True
+            return any(
+                fraction == 1
+                for name, fraction in stream.composition.items()
+                if name != component_name
+            )
 
         def flow_conversion(stream, component_name, basis):
             if self.solver_basis == basis:
@@ -302,13 +352,19 @@ class ProcessUnit:
             mw = molecular_weight(stream, component_name)
             if mw is None:
                 raise ValueError(
-                    f"Molar mass for '{component_name}' is required to convert flow bases."
+                    "Molar masses are required to convert flow bases; "
+                    f"missing for: {component_name}."
                 )
             return mw if basis == "mass" else 1.0 / mw
 
         def fraction_coefficients(stream, comp_name, fraction):
             # The specified fraction is the selected component amount divided by
             # the total amount on its own basis.
+            if fraction == 0:
+                # Zero mass and molar fractions both mean zero component flow.
+                # No molar mass is needed to express that condition in the
+                # solver basis.
+                return {(stream, comp_name): 1.0}
             coeff = {}
             for other_name in component_names:
                 factor = flow_conversion(stream, other_name, stream.composition_basis)
@@ -329,12 +385,29 @@ class ProcessUnit:
                     {
                         (stream, name): flow_conversion(stream, name, stream.flow_basis)
                         for name in component_names
+                        if not (
+                            stream.flow_basis != self.solver_basis
+                            and is_known_zero_component(stream, name)
+                        )
                     },
                     stream.flow_rate,
                     f"total flow for {stream.name}",
                 )
             for name, fraction in stream.composition.items():
                 if fraction is not None:
+                    if fraction == 1:
+                        # A pure component has no cross-basis ambiguity: every
+                        # other component flow is zero. Add those zero-flow
+                        # equations directly so missing molar masses for the
+                        # absent components are irrelevant.
+                        for other_name in component_names:
+                            if other_name != name:
+                                add_equation(
+                                    {(stream, other_name): 1.0},
+                                    0.0,
+                                    f"zero flow for {other_name} in {stream.name}",
+                                )
+                        continue
                     add_equation(
                         fraction_coefficients(stream, name, fraction),
                         0.0,
@@ -352,12 +425,20 @@ class ProcessUnit:
                 coeff = {
                     (first, name): flow_conversion(first, name, basis)
                     for name in component_names
+                    if not (
+                        basis != self.solver_basis
+                        and is_known_zero_component(first, name)
+                    )
                 }
                 for name in component_names:
                     ref = (second, name)
-                    coeff[ref] = coeff.get(ref, 0.0) - ratio.target_ratio * flow_conversion(
-                        second, name, basis
-                    )
+                    if basis != self.solver_basis and is_known_zero_component(
+                        second, name
+                    ):
+                        continue
+                    coeff[ref] = coeff.get(
+                        ref, 0.0
+                    ) - ratio.target_ratio * flow_conversion(second, name, basis)
                 add_equation(coeff, 0.0, ratio.description)
             elif isinstance(ratio, CompositionRatio):
                 stream = streams_by_name[ratio.stream_name]
@@ -377,7 +458,9 @@ class ProcessUnit:
                 second = streams_by_name[ratio.stream2_name]
                 basis = getattr(ratio, "basis", None) or self.solver_basis
                 if basis not in ("mass", "molar"):
-                    raise ValueError("ComponentFlowRatio basis must be 'mass' or 'molar'.")
+                    raise ValueError(
+                        "ComponentFlowRatio basis must be 'mass' or 'molar'."
+                    )
                 coeff = {
                     (first, ratio.comp1_name): flow_conversion(
                         first, ratio.comp1_name, basis
@@ -392,9 +475,17 @@ class ProcessUnit:
                 stream = streams_by_name[ratio.stream_name]
                 basis = getattr(ratio, "basis", None) or stream.flow_basis
                 if basis not in ("mass", "molar"):
-                    raise ValueError("ComponentFlowValue basis must be 'mass' or 'molar'.")
+                    raise ValueError(
+                        "ComponentFlowValue basis must be 'mass' or 'molar'."
+                    )
                 add_equation(
-                    {(stream, ratio.comp_name): flow_conversion(stream, ratio.comp_name, basis)},
+                    {
+                        (stream, ratio.comp_name): (
+                            1.0
+                            if ratio.target_value == 0
+                            else flow_conversion(stream, ratio.comp_name, basis)
+                        )
+                    },
                     ratio.target_value,
                     ratio.description,
                 )
@@ -406,19 +497,17 @@ class ProcessUnit:
         return variable_refs, np.asarray(rows), np.asarray(targets), labels
 
     def _build_material_balance_dataframe(self) -> pd.DataFrame:
-        """Build a table with native, mass-basis, and molar-basis stream results."""
+        """Build a table of basis-specific stream results.
+
+        Total and component flow rows are separated into mass and molar bases;
+        no row mixes values from different bases across streams.
+        """
         streams = self.input_streams + self.output_streams
         component_names = sorted(
             {component.name for stream in streams for component in stream.components}
         )
-        rows = [
-            ("total_flow_rate", ""),
-            ("mass_flow_rate", ""),
-            ("molar_flow_rate", ""),
-        ]
+        rows = [("mass_flow_rate", ""), ("molar_flow_rate", "")]
         for variable in (
-            "component_flow_rate",
-            "fraction",
             "component_mass_flow_rate",
             "component_molar_flow_rate",
             "mass_fraction",
@@ -431,7 +520,6 @@ class ProcessUnit:
 
         for stream in streams:
             values = {
-                ("total_flow_rate", ""): stream.flow_rate,
                 ("mass_flow_rate", ""): stream.mass_flow_rate,
                 ("molar_flow_rate", ""): stream.molar_flow_rate,
             }
@@ -440,34 +528,24 @@ class ProcessUnit:
             mass_total = stream.mass_flow_rate
             molar_total = stream.molar_flow_rate
             for component_name in component_names:
-                fraction = stream.composition.get(component_name)
-                values[("fraction", component_name)] = fraction
                 values[("mass_fraction", component_name)] = (
-                    None if mass_fractions is None
+                    None
+                    if mass_fractions is None
                     else mass_fractions.get(component_name)
                 )
                 values[("mole_fraction", component_name)] = (
-                    None if mole_fractions is None
+                    None
+                    if mole_fractions is None
                     else mole_fractions.get(component_name)
                 )
-                values[("component_flow_rate", component_name)] = (
-                    None if stream.flow_rate is None or fraction is None
-                    else stream.flow_rate * fraction
-                    if stream.flow_basis == stream.composition_basis
-                    else (
-                        mass_total * mass_fractions[component_name]
-                        if stream.flow_basis == "mass" and mass_fractions is not None
-                        else molar_total * mole_fractions[component_name]
-                        if stream.flow_basis == "molar" and mole_fractions is not None
-                        else None
-                    )
-                )
                 values[("component_mass_flow_rate", component_name)] = (
-                    None if mass_total is None or mass_fractions is None
+                    None
+                    if mass_total is None or mass_fractions is None
                     else mass_total * mass_fractions.get(component_name, 0.0)
                 )
                 values[("component_molar_flow_rate", component_name)] = (
-                    None if molar_total is None or mole_fractions is None
+                    None
+                    if molar_total is None or mole_fractions is None
                     else molar_total * mole_fractions.get(component_name, 0.0)
                 )
             table[stream.name] = pd.Series(values)
@@ -553,9 +631,14 @@ class ProcessUnit:
             if self.solver_basis == basis:
                 return value
             component = next(c for c in stream.components if c.name == component_name)
+            if value <= self.tol:
+                # A zero component flow remains zero on every physical basis,
+                # even when its molar mass was intentionally not supplied.
+                return 0.0
             if component.molar_mass is None:
                 raise ValueError(
-                    f"Molar mass for '{component_name}' is required to convert flow bases."
+                    "Molar masses are required to convert flow bases; "
+                    f"missing for: {component_name}."
                 )
             return (
                 value * component.molar_mass
@@ -607,9 +690,7 @@ class ProcessUnit:
                     stream for stream in streams if stream.name == ratio.stream2_name
                 )
                 basis = getattr(ratio, "basis", None) or self.solver_basis
-                denominator = flow_in_basis(
-                    denominator_stream, ratio.comp2_name, basis
-                )
+                denominator = flow_in_basis(denominator_stream, ratio.comp2_name, basis)
             elif isinstance(ratio, CompositionRatio):
                 denominator_stream = next(
                     stream for stream in streams if stream.name == ratio.stream_name
@@ -640,6 +721,25 @@ class ProcessUnit:
         print(f"\nProcess unit report: {self.name}")
         print(f"Material balance basis: {self.solver_basis}")
 
+        missing_molar_masses = sorted(
+            {
+                component.name
+                for stream in streams
+                for component in stream.components
+                if component.molar_mass is None
+                and stream.composition[component.name] is not None
+                and stream.composition[component.name] > self.tol
+            }
+        )
+        if missing_molar_masses:
+            unavailable_basis = "mass" if self.solver_basis == "molar" else "molar"
+            print(
+                f"{unavailable_basis.capitalize()}-basis results unavailable for "
+                "streams containing: "
+                + ", ".join(missing_molar_masses)
+                + " (molar mass not supplied)."
+            )
+
         for label, grouped_streams in (
             ("Input streams", self.input_streams),
             ("Output streams", self.output_streams),
@@ -659,8 +759,17 @@ class ProcessUnit:
                     name = component.name
                     fraction = stream.composition.get(name)
                     fraction_text = "unknown" if fraction is None else f"{fraction:.6g}"
-                    component_flow = table.loc[("component_flow_rate", name), stream.name]
-                    flow_text = "unknown" if pd.isna(component_flow) else f"{component_flow:.6g}"
+                    component_flow_row = (
+                        "component_mass_flow_rate"
+                        if stream.flow_basis == "mass"
+                        else "component_molar_flow_rate"
+                    )
+                    component_flow = table.loc[(component_flow_row, name), stream.name]
+                    flow_text = (
+                        "unknown"
+                        if pd.isna(component_flow)
+                        else f"{component_flow:.6g}"
+                    )
                     print(
                         f"    {name}: {stream.composition_basis} fraction = "
                         f"{fraction_text}, component flow = {flow_text} {stream.flow_type}"

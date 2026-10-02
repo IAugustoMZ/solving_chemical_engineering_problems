@@ -6,6 +6,8 @@ This module provides the Component class (representing chemical species) and the
 multi-stream creation from a shared component list.
 """
 
+from collections.abc import Mapping
+
 import numpy as np
 
 
@@ -40,9 +42,7 @@ class Component:
         Example:
             >>> acetone = Component("Acetone")
         """
-        if molar_mass is not None and (
-            not np.isfinite(molar_mass) or molar_mass <= 0
-        ):
+        if molar_mass is not None and (not np.isfinite(molar_mass) or molar_mass <= 0):
             raise ValueError("molar_mass must be a finite positive value.")
         self.name = name
         self.molar_mass = molar_mass
@@ -140,7 +140,9 @@ class Stream:
         if self.composition_basis not in ("mass", "molar", "volume"):
             raise ValueError("composition_basis must be 'mass' or 'molar'.")
         if self.composition_basis == "volume" and self.flow_basis != "volume":
-            raise ValueError("Volume composition cannot be used with mass or molar flow.")
+            raise ValueError(
+                "Volume composition cannot be used with mass or molar flow."
+            )
         self.components = components
         self.composition = composition
         self.direction = direction
@@ -156,19 +158,55 @@ class Stream:
             or any(v is None for v in self.composition.values())
         ):
             return None
-        if any(c.molar_mass is None for c in self.components):
-            if self.flow_basis == self.composition_basis == "molar":
-                return {c.name: self.flow_rate * self.composition[c.name] for c in self.components}
+        fractions = {c.name: self.composition[c.name] for c in self.components}
+        if self.flow_basis == self.composition_basis == "molar":
+            return {
+                name: self.flow_rate * fraction for name, fraction in fractions.items()
+            }
+
+        # A component whose specified fraction is zero has zero flow on either
+        # mass or molar basis. Its molar mass is therefore not needed for a
+        # conversion. This matters for pure tracer streams represented with a
+        # shared component list (for example, pure CO2 plus a carrier gas of
+        # unknown molar mass).
+        missing_active_molar_mass = any(
+            component.molar_mass is None and fractions[component.name] != 0
+            for component in self.components
+        )
+        if missing_active_molar_mass:
             return None
         if self.composition_basis == "molar":
-            fractions = {c.name: self.composition[c.name] for c in self.components}
-            average_mass = sum(fractions[c.name] * c.molar_mass for c in self.components)
-            total_moles = self.flow_rate if self.flow_basis == "molar" else self.flow_rate / average_mass
-            return {name: total_moles * fraction for name, fraction in fractions.items()}
-        fractions = {c.name: self.composition[c.name] for c in self.components}
-        mass_per_mole = sum(fractions[c.name] / c.molar_mass for c in self.components)
-        total_mass = self.flow_rate if self.flow_basis == "mass" else self.flow_rate / mass_per_mole
-        return {c.name: total_mass * fractions[c.name] / c.molar_mass for c in self.components}
+            average_mass = sum(
+                fractions[component.name] * component.molar_mass
+                for component in self.components
+                if fractions[component.name] != 0
+            )
+            total_moles = (
+                self.flow_rate
+                if self.flow_basis == "molar"
+                else self.flow_rate / average_mass
+            )
+            return {
+                name: total_moles * fraction for name, fraction in fractions.items()
+            }
+        mass_per_mole = sum(
+            fractions[component.name] / component.molar_mass
+            for component in self.components
+            if fractions[component.name] != 0
+        )
+        total_mass = (
+            self.flow_rate
+            if self.flow_basis == "mass"
+            else self.flow_rate / mass_per_mole
+        )
+        return {
+            component.name: (
+                0.0
+                if fractions[component.name] == 0
+                else total_mass * fractions[component.name] / component.molar_mass
+            )
+            for component in self.components
+        }
 
     @property
     def molar_flow_rate(self):
@@ -184,14 +222,26 @@ class Stream:
         if self.flow_rate is not None and self.flow_basis == "mass":
             return self.flow_rate
         flows = self._molar_flows_from_known_data()
-        if flows is None or any(c.molar_mass is None for c in self.components):
+        if flows is None or any(
+            component.molar_mass is None and flows[component.name] != 0
+            for component in self.components
+        ):
             return None
-        return sum(flows[c.name] * c.molar_mass for c in self.components)
+        return sum(
+            (
+                0.0
+                if flows[component.name] == 0
+                else flows[component.name] * component.molar_mass
+            )
+            for component in self.components
+        )
 
     @property
     def mole_fractions(self):
         """Derived mole fractions, or None until sufficient data are known."""
-        if self.composition_basis == "molar" and all(v is not None for v in self.composition.values()):
+        if self.composition_basis == "molar" and all(
+            v is not None for v in self.composition.values()
+        ):
             return dict(self.composition)
         flows = self._molar_flows_from_known_data()
         if flows is None:
@@ -202,14 +252,28 @@ class Stream:
     @property
     def mass_fractions(self):
         """Derived mass fractions, or None until sufficient data are known."""
-        if self.composition_basis == "mass" and all(v is not None for v in self.composition.values()):
+        if self.composition_basis == "mass" and all(
+            v is not None for v in self.composition.values()
+        ):
             return dict(self.composition)
         flows = self._molar_flows_from_known_data()
-        if flows is None or any(c.molar_mass is None for c in self.components):
+        if flows is None or any(
+            component.molar_mass is None and flows[component.name] != 0
+            for component in self.components
+        ):
             return None
-        masses = {c.name: flows[c.name] * c.molar_mass for c in self.components}
+        masses = {
+            component.name: (
+                0.0
+                if flows[component.name] == 0
+                else flows[component.name] * component.molar_mass
+            )
+            for component in self.components
+        }
         total = sum(masses.values())
-        return {name: value / total for name, value in masses.items()} if total else None
+        return (
+            {name: value / total for name, value in masses.items()} if total else None
+        )
 
     def _validate_components_composition(self) -> None:
         """
@@ -284,8 +348,9 @@ class StreamFactory:
         components (list[Component]): Corresponding Component objects (shared across all streams).
         default_flow_type (str or None): Default mass- or molar-flow unit applied
                                         unless overridden per add_stream call.
-        molar_masses (dict[str, float]): Optional mapping of component names to
-                                        molar masses.
+        molar_masses (dict[str, float] or list[float | None]): Optional molar
+            masses, supplied either as a mapping by component name or as a list
+            aligned with ``component_names``.
         streams (dict[str, Stream]): Registry of created streams, keyed by name.
         ratios (list[Ratio]): List of registered ratio constraints (validated against streams).
 
@@ -300,7 +365,10 @@ class StreamFactory:
     """
 
     def __init__(
-        self, component_names: list, default_flow_type: str = None, molar_masses: dict = None
+        self,
+        component_names: list,
+        default_flow_type: str = None,
+        molar_masses: dict | list | tuple = None,
     ) -> None:
         """
         Initialize a StreamFactory with a shared component list.
@@ -309,22 +377,40 @@ class StreamFactory:
             component_names (list[str]): Names of all components present in streams
                                         created by this factory (e.g., ["Water", "Acetone"]).
             default_flow_type (str, optional): Default mass- or molar-flow unit.
-            molar_masses (dict, optional): Mapping of component names to molar masses.
-                Required for conversions that mix mass and molar bases.
+            molar_masses (dict or list, optional): Molar masses supplied either
+                as a mapping of component names to values or positionally in
+                the same order as ``component_names``. Use ``None`` for a
+                component whose molar mass is intentionally unavailable.
 
         Example:
             >>> factory = StreamFactory(["Water", "Acetone"], default_flow_type="mole")
         """
         self.component_names = component_names
-        molar_masses = molar_masses or {}
-        unknown_molar_mass_names = set(molar_masses) - set(component_names)
+        if molar_masses is None:
+            molar_mass_by_name = {}
+        elif isinstance(molar_masses, Mapping):
+            molar_mass_by_name = dict(molar_masses)
+        elif isinstance(molar_masses, (list, tuple)):
+            if len(molar_masses) != len(component_names):
+                raise ValueError(
+                    "Molar-mass length "
+                    f"({len(molar_masses)}) must match component count "
+                    f"({len(component_names)})."
+                )
+            molar_mass_by_name = dict(zip(component_names, molar_masses))
+        else:
+            raise TypeError(
+                "molar_masses must be a mapping or a list aligned with component_names."
+            )
+
+        unknown_molar_mass_names = set(molar_mass_by_name) - set(component_names)
         if unknown_molar_mass_names:
             raise ValueError(
                 "Molar masses were provided for unknown components: "
-                + ", ".join(sorted(unknown_molar_mass_names))
+                + ", ".join(sorted(map(str, unknown_molar_mass_names)))
             )
         self.components = [
-            Component(name, molar_masses.get(name)) for name in component_names
+            Component(name, molar_mass_by_name.get(name)) for name in component_names
         ]
         self.default_flow_type = default_flow_type
         self.streams: dict[str, Stream] = {}

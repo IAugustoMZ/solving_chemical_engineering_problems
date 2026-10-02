@@ -334,29 +334,33 @@ class TestProcessUnitWithRatios:
         water = Component("Water")
         salt = Component("Salt")
 
-        inlet = Stream("inlet", 10.0, "mass", [water, salt], {"Water": 0.9, "Salt": 0.1})
-        outlet = Stream("outlet", None, "mass", [water, salt], {"Water": None, "Salt": None})
+        inlet = Stream(
+            "inlet", 10.0, "mass", [water, salt], {"Water": 0.9, "Salt": 0.1}
+        )
+        outlet = Stream(
+            "outlet", None, "mass", [water, salt], {"Water": None, "Salt": None}
+        )
 
         ratio = ComponentFlowValue("outlet", "Salt", target_value=2.0)
 
         unit = ProcessUnit("Unit", [inlet], [outlet], ratios=[ratio])
 
-        # unknowns: outlet.F + outlet.x_Water + outlet.x_Salt = 3
-        # material balances: 2 (water, salt)
-        # composition constraint: 1 (sum of compositions)
-        # ratio constraint: 1
-        # DOF = 3 - 2 - 1 - 1 = -1 (overdetermined)
-        # This is expected when adding extra constraints beyond what's needed
-        assert not unit.is_solvable()
+        # The assembled component-flow system has a unique structural solution;
+        # feasibility of the additional constraint is checked by the solver.
+        assert unit.is_solvable()
 
     def test_process_unit_solve_component_flow_value_exact(self):
         """Test solving with ComponentFlowValue: a perfectly determined system."""
         water = Component("Water")
         salt = Component("Salt")
 
-        inlet = Stream("inlet", 100.0, "mass", [water, salt], {"Water": 0.9, "Salt": 0.1})
+        inlet = Stream(
+            "inlet", 100.0, "mass", [water, salt], {"Water": 0.9, "Salt": 0.1}
+        )
         # outlet: unknown flow, but composition fully specified
-        outlet = Stream("outlet", None, "mass", [water, salt], {"Water": 0.8, "Salt": 0.2})
+        outlet = Stream(
+            "outlet", None, "mass", [water, salt], {"Water": 0.8, "Salt": 0.2}
+        )
 
         # We specify that outlet must carry 20 kg/h of salt
         # This pins down the outlet flow: F * 0.2 = 20 => F = 100
@@ -390,7 +394,9 @@ class TestComponentFlowValue:
         salt = Component("Salt")
 
         # stream: 100 kg/h total, 50% water, 50% salt -> 50 kg/h of water
-        stream = Stream("stream1", 100.0, "mass", [water, salt], {"Water": 0.5, "Salt": 0.5})
+        stream = Stream(
+            "stream1", 100.0, "mass", [water, salt], {"Water": 0.5, "Salt": 0.5}
+        )
 
         ratio = ComponentFlowValue("stream1", "Water", target_value=50.0)
         streams_dict = {"stream1": stream}
@@ -404,7 +410,9 @@ class TestComponentFlowValue:
         salt = Component("Salt")
 
         # stream: 100 kg/h total, 50% water, 50% salt -> 50 kg/h of water
-        stream = Stream("stream1", 100.0, "mass", [water, salt], {"Water": 0.5, "Salt": 0.5})
+        stream = Stream(
+            "stream1", 100.0, "mass", [water, salt], {"Water": 0.5, "Salt": 0.5}
+        )
 
         ratio = ComponentFlowValue("stream1", "Water", target_value=60.0)
         streams_dict = {"stream1": stream}
@@ -424,7 +432,9 @@ class TestComponentFlowValue:
         """Test validation passes with valid references."""
         water = Component("Water")
         salt = Component("Salt")
-        stream = Stream("outlet", 10.0, "mass", [water, salt], {"Water": 0.5, "Salt": 0.5})
+        stream = Stream(
+            "outlet", 10.0, "mass", [water, salt], {"Water": 0.5, "Salt": 0.5}
+        )
 
         ratio = ComponentFlowValue("outlet", "Water", target_value=5.0)
         streams_dict = {"outlet": stream}
@@ -444,7 +454,9 @@ class TestComponentFlowValue:
         """Test validation fails when component is missing."""
         water = Component("Water")
         salt = Component("Salt")
-        stream = Stream("outlet", 10.0, "mass", [water, salt], {"Water": 0.5, "Salt": 0.5})
+        stream = Stream(
+            "outlet", 10.0, "mass", [water, salt], {"Water": 0.5, "Salt": 0.5}
+        )
 
         ratio = ComponentFlowValue("outlet", "Acetone", target_value=5.0)
         streams_dict = {"outlet": stream}
@@ -506,7 +518,7 @@ class TestJamProductionCase:
         )
         assert heater_no_ratio.is_solvable()
 
-        # With ratio constraint: DOF = 3 - 3 - 1 = -1 (over-determined)
+        # The ratio adds a redundant but consistent structural constraint.
         ratio = FlowRatio("Strawberry", "SugarInlet", target_ratio=45 / 55)
         heater = ProcessUnit(
             "Heater",
@@ -514,7 +526,7 @@ class TestJamProductionCase:
             [jam, evaporated],
             ratios=[ratio],
         )
-        assert not heater.is_solvable()  # Over-determined with ratio
+        assert heater.is_solvable()
 
     def test_jam_production_solve(self):
         """Test solving jam production material balance with ratio constraint."""

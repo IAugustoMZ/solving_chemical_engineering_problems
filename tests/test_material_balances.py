@@ -220,11 +220,9 @@ class TestStream:
             components=[water, ethanol, acetone],
             composition={"Water": 0.5, "Ethanol": 0.3, "Acetone": None},
         )
-        assert stream.composition["Acetone"] is None
+        assert np.isclose(stream.composition["Acetone"], 0.2)
         assert stream.composition["Water"] == 0.5
         assert stream.composition["Ethanol"] == 0.3
-
-
 
 
 class TestMassMolarConversions:
@@ -251,13 +249,21 @@ class TestMassMolarConversions:
         methanol = Component("Methanol", molar_mass=32.04)
         water = Component("Water", molar_mass=18.015)
         feed = Stream(
-            "feed", 100.0, "kg/h", [methanol, water],
-            {"Methanol": 0.5, "Water": 0.5}, composition_basis="molar"
+            "feed",
+            100.0,
+            "kg/h",
+            [methanol, water],
+            {"Methanol": 0.5, "Water": 0.5},
+            composition_basis="molar",
         )
         product = Stream(
-            "product", None, "kmol/h", [methanol, water],
-            {"Methanol": 0.5, "Water": 0.5}, direction="output",
-            composition_basis="molar"
+            "product",
+            None,
+            "kmol/h",
+            [methanol, water],
+            {"Methanol": 0.5, "Water": 0.5},
+            direction="output",
+            composition_basis="molar",
         )
         unit = ProcessUnit("Transfer", [feed], [product])
 
@@ -268,29 +274,76 @@ class TestMassMolarConversions:
         assert np.isclose(table.loc[("mass_flow_rate", ""), "product"], 100.0)
         assert np.isclose(table.loc[("molar_flow_rate", ""), "product"], expected_kmol)
         assert np.isclose(
-            table.loc[("component_mass_flow_rate", "Methanol"), "product"], 50.0
+            table.loc[("component_mass_flow_rate", "Methanol"), "product"],
+            expected_kmol / 2 * 32.04,
         )
         assert np.isclose(
             table.loc[("component_molar_flow_rate", "Methanol"), "product"],
             expected_kmol / 2,
         )
-        assert np.isclose(table.loc[("mass_fraction", "Methanol"), "product"], 32.04 / (32.04 + 18.015))
+        assert np.isclose(
+            table.loc[("mass_fraction", "Methanol"), "product"],
+            32.04 / (32.04 + 18.015),
+        )
         assert np.isclose(table.loc[("mole_fraction", "Methanol"), "product"], 0.5)
 
     def test_mixed_basis_requires_molar_masses(self):
         component_a = Component("A")
         component_b = Component("B")
         feed = Stream(
-            "feed", 100.0, "kg/h", [component_a, component_b],
-            {"A": 0.5, "B": 0.5}, composition_basis="molar"
+            "feed",
+            100.0,
+            "kg/h",
+            [component_a, component_b],
+            {"A": 0.5, "B": 0.5},
+            composition_basis="molar",
         )
         product = Stream(
-            "product", None, "molar", [component_a, component_b],
-            {"A": 0.5, "B": 0.5}, direction="output"
+            "product",
+            None,
+            "molar",
+            [component_a, component_b],
+            {"A": 0.5, "B": 0.5},
+            direction="output",
         )
 
         with pytest.raises(ValueError, match="Molar masses are required"):
             ProcessUnit("Missing molar masses", [feed], [product])
+
+    def test_pure_mass_tracer_requires_only_tracer_molar_mass(self):
+        """A molar balance can use a pure mass-specified tracer selectively."""
+        factory = StreamFactory(
+            ["CO2", "Carrier gas"],
+            default_flow_type="kmol/min",
+            molar_masses=[44.01, None],
+        )
+        upstream = factory.add_stream("upstream", [0.015, 0.985])
+        factory.add_stream(
+            "injected_CO2",
+            [1.0, 0.0],
+            flow_rate=20.0,
+            flow_type="kg/min",
+            composition_basis="molar",
+        )
+        downstream = factory.add_stream(
+            "downstream", [0.023, 0.977], direction="output"
+        )
+
+        unit = factory.build_process_unit("Indicator dilution")
+        table = unit.solve_material_balances()
+
+        injected_molar_flow = 20.0 / 44.01
+        expected_upstream_flow = injected_molar_flow * (1.0 - 0.023) / (0.023 - 0.015)
+        assert unit.solver_basis == "molar"
+        assert np.isclose(upstream.flow_rate, expected_upstream_flow)
+        assert np.isclose(
+            downstream.flow_rate, expected_upstream_flow + injected_molar_flow
+        )
+        assert np.isclose(
+            table.loc[("molar_flow_rate", ""), "upstream"], expected_upstream_flow
+        )
+        assert pd.isna(table.loc[("mass_flow_rate", ""), "upstream"])
+        assert pd.isna(table.loc[("mass_flow_rate", ""), "downstream"])
 
 
 class TestProcessUnit:
@@ -359,6 +412,34 @@ class TestProcessUnit:
         # 2 unknowns = 2 material balances, so solvable
         assert unit.is_solvable()
 
+    def test_degree_of_freedom_report_lists_unknowns_and_constraints(self, capsys):
+        """The DOF report identifies fields to solve and a row basis of constraints."""
+        water = Component("Water")
+        acetone = Component("Acetone")
+        feed = Stream(
+            "feed", 10.0, "mole", [water, acetone], {"Water": 0.65, "Acetone": 0.35}
+        )
+        product = Stream(
+            "product",
+            None,
+            "mole",
+            [water, acetone],
+            {"Water": 0.65, "Acetone": 0.35},
+        )
+        unit = ProcessUnit("Transfer", [feed], [product])
+
+        unit.report_degrees_of_freedom()
+
+        report = capsys.readouterr().out
+        assert "Unknown input fields (flows + fractions): 1" in report
+        assert "- Stream 'product': flow rate" in report
+        assert "Component-flow variables (molar basis): 4" in report
+        assert "1. Stream 'feed': 'Acetone'" in report
+        assert "4. Stream 'product': 'Water'" in report
+        assert "Independent constraint rank: 4" in report
+        assert "1. material balance for Acetone" in report
+        assert "2. material balance for Water" in report
+
     def test_process_unit_is_solvable_true(self):
         """Test solvability check returns True when system is solvable."""
         water = Component("Water")
@@ -409,20 +490,28 @@ class TestProcessUnit:
         assert isinstance(result, pd.DataFrame)
         assert list(result.columns) == ["feed", "vapor", "liquid"]
         assert result.index.names == ["variable", "component"]
-        assert result.loc[("total_flow_rate", ""), "feed"] == 10.0
+        assert ("total_flow_rate", "") not in result.index
+        assert ("component_flow_rate", "Water") not in result.index
+        assert ("fraction", "Water") not in result.index
+        assert np.isclose(result.loc[("molar_flow_rate", ""), "feed"], 10.0)
         assert np.isclose(
-            result.loc[("component_flow_rate", "Water"), "feed"], 6.5
+            result.loc[("component_molar_flow_rate", "Water"), "feed"], 6.5
         )
-        assert np.isclose(
-            result.loc[("fraction", "Acetone"), "feed"], 0.35
-        )
+        assert np.isclose(result.loc[("mole_fraction", "Acetone"), "feed"], 0.35)
         for stream_name in result.columns:
-            assert result.loc[
-                [("total_flow_rate", "")]
-                + [("component_flow_rate", name) for name in ["Water", "Acetone"]]
-                + [("fraction", name) for name in ["Water", "Acetone"]],
-                stream_name,
-            ].notna().all()
+            assert (
+                result.loc[
+                    [("molar_flow_rate", "")]
+                    + [
+                        ("component_molar_flow_rate", name)
+                        for name in ["Water", "Acetone"]
+                    ]
+                    + [("mole_fraction", name) for name in ["Water", "Acetone"]],
+                    stream_name,
+                ]
+                .notna()
+                .all()
+            )
 
         # Check that flow rates were solved
         assert vapor.flow_rate is not None
@@ -444,9 +533,9 @@ class TestProcessUnit:
 
         assert isinstance(result, pd.DataFrame)
         assert list(result.columns) == ["feed", "product"]
-        assert result.loc[("total_flow_rate", ""), "feed"] == 10.0
-        assert result.loc[("component_flow_rate", "Water"), "product"] == 10.0
-        assert result.loc[("fraction", "Water"), "product"] == 1.0
+        assert result.loc[("molar_flow_rate", ""), "feed"] == 10.0
+        assert result.loc[("component_molar_flow_rate", "Water"), "product"] == 10.0
+        assert result.loc[("mole_fraction", "Water"), "product"] == 1.0
 
     def test_process_unit_solve_unsolvable_raises_error(self):
         """Test that solving unsolvable system raises ValueError."""
@@ -511,10 +600,10 @@ class TestProcessUnit:
 
         table = unit.solve_material_balances()
 
-        assert np.isclose(table.loc[("total_flow_rate", ""), "Product"], 80.0)
-        assert np.isclose(table.loc[("total_flow_rate", ""), "Waste"], 20.0)
-        assert np.isclose(table.loc[("fraction", "P"), "Feed"], 0.68)
-        assert np.isclose(table.loc[("component_flow_rate", "P"), "Product"], 64.0)
+        assert np.isclose(table.loc[("mass_flow_rate", ""), "Product"], 80.0)
+        assert np.isclose(table.loc[("mass_flow_rate", ""), "Waste"], 20.0)
+        assert np.isclose(table.loc[("mass_fraction", "P"), "Feed"], 0.68)
+        assert np.isclose(table.loc[("component_mass_flow_rate", "P"), "Product"], 64.0)
 
     @pytest.mark.parametrize("unknown_stream", ["Product", "Waste"])
     def test_linear_component_flow_solver_rejects_infeasible_data(self, unknown_stream):
@@ -584,6 +673,21 @@ class TestStreamFactory:
         assert factory.streams == {}
         assert factory.ratios == []
 
+    def test_factory_accepts_positional_molar_masses(self):
+        """Positional molar masses align with the factory component order."""
+        factory = StreamFactory(
+            ["CO2", "Carrier gas"],
+            default_flow_type="kmol/min",
+            molar_masses=[44.01, None],
+        )
+
+        assert factory.components[0].molar_mass == 44.01
+        assert factory.components[1].molar_mass is None
+
+    def test_factory_rejects_wrong_positional_molar_mass_length(self):
+        with pytest.raises(ValueError, match="Molar-mass length"):
+            StreamFactory(["CO2", "Carrier gas"], molar_masses=[44.01])
+
     def test_add_stream_basic(self):
         """Test creating a stream with positional compositions."""
         factory = StreamFactory(["Water", "Acetone"], default_flow_type="mole")
@@ -602,7 +706,7 @@ class TestStreamFactory:
         stream = factory.add_stream("Feed", [0.65, None], flow_rate=10.0)
 
         assert stream.composition["Water"] == 0.65
-        assert stream.composition["Acetone"] is None
+        assert np.isclose(stream.composition["Acetone"], 0.35)
 
     def test_add_stream_duplicate_name_raises(self):
         """Test that duplicate stream name raises ValueError."""
@@ -881,29 +985,36 @@ class TestMultipleNoneCompositions:
 
         # Feed with 2 unknown compositions (no auto-calc when multiple unknowns)
         feed = Stream(
-            "feed", 10.0, "mole", [water, acetone, ethanol],
-            {"Water": 0.5, "Acetone": None, "Ethanol": None}
+            "feed",
+            10.0,
+            "mole",
+            [water, acetone, ethanol],
+            {"Water": 0.5, "Acetone": None, "Ethanol": None},
         )
 
         # Streams with 1 unknown flow rate and 2 unknown compositions
         vapor = Stream(
-            "vapor", None, "mole", [water, acetone, ethanol],
-            {"Water": 0.3, "Acetone": None, "Ethanol": None}
+            "vapor",
+            None,
+            "mole",
+            [water, acetone, ethanol],
+            {"Water": 0.3, "Acetone": None, "Ethanol": None},
         )
 
         liquid = Stream(
-            "liquid", None, "mole", [water, acetone, ethanol],
-            {"Water": 0.4, "Acetone": None, "Ethanol": None}
+            "liquid",
+            None,
+            "mole",
+            [water, acetone, ethanol],
+            {"Water": 0.4, "Acetone": None, "Ethanol": None},
         )
 
         unit = ProcessUnit("Evaporator", [feed], [vapor, liquid])
 
-        # 6 unknowns (4 compositions + 2 flow rates)
-        # 3 material balance equations
-        # 3 composition sum constraints (one per stream with unknown compositions)
-        # DOF = 6 - 3 - 3 = 0
-        assert unit.unknowns == 6
-        assert unit.is_solvable()
+        # 8 unknown input fields: 2 compositions on each of 3 streams and
+        # 2 unknown flow rates. The component-flow system remains underdetermined.
+        assert unit.unknowns == 8
+        assert not unit.is_solvable()
 
     def test_three_component_system_with_multiple_unknowns_per_stream(self):
         """Test 3-component system where some streams have multiple unknown compositions."""
@@ -931,12 +1042,10 @@ class TestMultipleNoneCompositions:
 
         unit = ProcessUnit("Separator", [feed], [product])
 
-        # 3 unknowns (2 compositions + 1 flow rate)
-        # 3 material balance equations
-        # 1 composition sum constraint (for product stream only)
-        # DOF = 3 - 3 - 1 = -1 (over-determined)
+        # The component-flow constraints determine the product flow and
+        # compositions uniquely.
         assert unit.unknowns == 3
-        assert not unit.is_solvable()
+        assert unit.is_solvable()
 
     def test_multiple_unknowns_validation_specifying_too_much(self):
         """Test that specified compositions cannot exceed 1.0 with multiple unknowns."""

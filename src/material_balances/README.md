@@ -19,8 +19,10 @@ water = Component("Water", molar_mass=18.015)
 acetone = Component("Acetone", molar_mass=58.08)
 ```
 
-Molar masses are optional for single-basis balances and required when a conversion
-between mass and molar quantities is needed.
+Molar masses are optional for single-basis balances and are required only for
+components that participate in a mass/molar conversion. If a balance can be
+solved on one basis with partial molar-mass data, the solver reports that basis
+and leaves non-derivable results on the other basis blank.
 
 ### Stream
 
@@ -66,7 +68,7 @@ Represents a piece of equipment with inlet and outlet streams. Performs material
 - Checks structural solvability from the independent constraint rank
 - Solves balances with SciPy's `linprog`
 - Reconciles every specified flow and fraction before updating streams
-- Returns native, mass-basis, and molar-basis flow and fraction rows when derivable
+- Returns separate mass-basis and molar-basis flow and fraction rows when derivable
 
 ```python
 from src.material_balances import ProcessUnit, FlowRatio
@@ -139,6 +141,23 @@ evaporator.solve_material_balances()
 evaporator.print_report()
 ```
 
+### Degree-of-freedom reports
+
+`report_degrees_of_freedom()` prints each unknown stream field, every
+component-flow variable (including the selected mass or molar basis), and a
+rank-increasing list of independent constraints. This makes it clear which
+stream specifications determine the reported structural rank.
+
+```text
+Unknown input fields (flows + fractions): 2
+  - Stream 'CarryGas': flow rate
+  - Stream 'Mixture': flow rate
+Component-flow variables (molar basis): 6
+  1. Stream 'CarryGas': 'CO2'
+  2. Stream 'CarryGas': 'others'
+Independent constraint rank: 6
+```
+
 ## Mass and Molar Basis Handling
 
 Use `molar_mass` on each component and set `composition_basis` independently
@@ -164,11 +183,26 @@ unit = factory.build_process_unit("Transfer")
 results = unit.solve_material_balances()
 ```
 
-The returned dataframe includes `mass_flow_rate`, `molar_flow_rate`,
-`component_mass_flow_rate`, `component_molar_flow_rate`, `mass_fraction`,
-and `mole_fraction`, in addition to the original native-basis rows. A derived
-value is blank when its conversion cannot be determined from the supplied
-molar masses.
+`molar_masses` may also be a positional list aligned with the component names;
+use `None` for a component whose molar mass is unavailable:
+
+```python
+factory = StreamFactory(
+    ["CO2", "Carrier gas"],
+    default_flow_type="kmol/min",
+    molar_masses=[44.01, None],
+)
+```
+
+The returned dataframe separates every flow into `mass_flow_rate` or
+`molar_flow_rate`, and every component flow into
+`component_mass_flow_rate` or `component_molar_flow_rate`. It likewise uses
+`mass_fraction` and `mole_fraction`; there are no native-basis rows that mix
+mass and molar values across streams. A derived value is blank when its
+conversion cannot be determined from the supplied molar masses. For example,
+a pure CO2 tracer specified in kg/min can be converted and used in a molar
+balance with only CO2's molar mass; total mass flows remain unavailable when
+the carrier-gas molar mass is not supplied.
 
 Ratio constraints that compare total or component flow rates can accept
 `basis="mass"` or `basis="molar"`. If omitted, flow ratios use the process
