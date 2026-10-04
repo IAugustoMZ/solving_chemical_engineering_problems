@@ -32,7 +32,11 @@ fi
 
 # 1. Black - Code formatting check
 echo "1. Checking code formatting with black..."
-if poetry run black --check src/ tests/ 2>/dev/null; then
+if formatting_failed=0; while IFS= read -r file; do
+    if ! poetry run black --check "$file" 2>/dev/null; then
+        formatting_failed=1
+    fi
+done < <(rg --files src tests -g '*.py'); [ "$formatting_failed" -eq 0 ]; then
     echo -e "${GREEN}✓ Black check passed${NC}"
 else
     echo -e "${RED}✗ Black check failed${NC}"

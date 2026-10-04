@@ -1,65 +1,16 @@
 """
-Stream and Component classes for representing process streams in material balance problems.
+Stream model for representing process streams in material balance problems.
 
-This module provides the Component class (representing chemical species) and the Stream class
-(representing material flows with composition), along with StreamFactory for convenient
-multi-stream creation from a shared component list.
+This module provides the Stream class. Component and StreamFactory live in their
+own modules and are re-exported here only for compatibility with earlier imports.
 """
 
 from collections.abc import Mapping
 
 import numpy as np
 
-
-class Component:
-    """
-    Represents a chemical component or species in a process stream.
-
-    A Component is a fundamental entity in material balance calculations,
-    representing individual chemical species (e.g., H2O, C2H5OH, C12H22O11).
-    Components are referenced by name and used in composition calculations
-    for streams and material balances for process units.
-
-    Attributes:
-        name (str): The name or identifier of the component (e.g., "Water",
-                    "Acetone", "Sugar").
-        molar_mass (float or None): Positive mass per mole value used for
-                                    mass/molar conversions.
-
-    Example:
-        >>> water = Component("Water")
-        >>> water.name
-        'Water'
-    """
-
-    def __init__(self, name: str, molar_mass: float = None) -> None:
-        """
-        Initialize a Component with a given name.
-
-        Parameters:
-            name (str): The name or identifier of the chemical component.
-
-        Example:
-            >>> acetone = Component("Acetone")
-        """
-        if molar_mass is not None and (not np.isfinite(molar_mass) or molar_mass <= 0):
-            raise ValueError("molar_mass must be a finite positive value.")
-        self.name = name
-        self.molar_mass = molar_mass
-
-
-def _basis_from_type(flow_type: str) -> str:
-    """Map a flow unit label to its mass or molar basis."""
-    normalized = str(flow_type).strip().lower()
-    if any(token in normalized for token in ("mole", "molar", "mol", "kmol")):
-        return "molar"
-    if any(token in normalized for token in ("mass", "kg", "gram", " g", "ton")):
-        return "mass"
-    if "volume" in normalized or normalized in ("volumetric", "m3/h", "l/min"):
-        return "volume"
-    raise ValueError(
-        f"Unsupported flow_type '{flow_type}': use mass, molar, or legacy volumetric units."
-    )
+from .basis import basis_from_flow_type
+from .component import Component
 
 
 class Stream:
@@ -135,7 +86,7 @@ class Stream:
         self.name = name
         self.flow_rate = flow_rate
         self.flow_type = flow_type
-        self.flow_basis = _basis_from_type(flow_type)
+        self.flow_basis = basis_from_flow_type(flow_type)
         self.composition_basis = composition_basis or self.flow_basis
         if self.composition_basis not in ("mass", "molar", "volume"):
             raise ValueError("composition_basis must be 'mass' or 'molar'.")
@@ -333,7 +284,7 @@ class Stream:
                         break
 
 
-class StreamFactory:
+class _LegacyStreamFactory:
     """
     Factory for creating and managing multiple streams with a shared component list.
 
@@ -634,3 +585,7 @@ class StreamFactory:
             output_streams=output_streams,
             ratios=self.ratios,
         )
+
+
+# Kept for direct imports from the pre-refactor module path.
+from .factory import StreamFactory

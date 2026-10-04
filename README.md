@@ -109,22 +109,25 @@ solving_chemical_engineering_problems/
 ├── README.md
 ├── .gitignore
 ├── src/
-│   ├── utils/
-│   │   └── validators.py
 │   └── material_balances/
-│       ├── models/
-│       │   ├── stream.py
-│       │   └── balance_system.py
-│       └── simple_material_balances.py
-├── 00_mass_energy_balances/
-└── notebooks/
-    ├── 01_thermodynamics/
-    ├── 02_fluid_mechanics/
-    ├── 03_heat_transfer/
-    ├── 04_mass_transfer_and_separations/
-    ├── 05_reaction_engineering/
-    ├── 06_process_control/
-    └── 07_numerical_methods/
+│       ├── component.py
+│       ├── stream.py
+│       ├── basis.py
+│       ├── factory.py
+│       ├── process_unit.py
+│       ├── constraints/
+│       ├── solver/
+│       └── reporting/
+├── notebooks/
+│   └── groundtruth/
+│       └── 00_mass_energy_balances/
+│       ├── 01_thermodynamics/
+│       ├── 02_fluid_mechanics/
+│       ├── 03_heat_transfer/
+│       ├── 04_mass_transfer_and_separations/
+│       ├── 05_reaction_engineering/
+│       ├── 06_process_control/
+│       └── 07_numerical_methods/
 ```
 
 ---
