@@ -7,14 +7,15 @@ material balance problems around process units with inlet and outlet streams.
 
 import numpy as np
 import pandas as pd
-from scipy.optimize import linprog
 
-from .ratio_constraints import (
+from .constraints import (
     ComponentFlowRatio,
     ComponentFlowValue,
     CompositionRatio,
     FlowRatio,
 )
+from .reporting import build_material_balance_dataframe
+from .solver import ComponentFlowSystem, solve_nonnegative
 
 
 class ProcessUnit:
@@ -217,10 +218,7 @@ class ProcessUnit:
         names = sorted(
             {component.name for stream in streams for component in stream.components}
         )
-        _, matrix, _, _ = self._build_component_flow_system(names)
-        row_scales = np.maximum(np.max(np.abs(matrix), axis=1), 1.0)
-        rank = np.linalg.matrix_rank(matrix / row_scales[:, np.newaxis])
-        return bool(rank == len(streams) * len(names))
+        return self._component_flow_system(names).is_uniquely_determined
 
     def report_degrees_of_freedom(self) -> None:
         """Report structural degrees of freedom and their defining specifications."""
@@ -228,14 +226,13 @@ class ProcessUnit:
         component_names = sorted(
             {component.name for stream in streams for component in stream.components}
         )
-        variable_refs, matrix, _, labels = self._build_component_flow_system(
-            component_names
-        )
+        system = self._component_flow_system(component_names)
+        variable_refs = system.variable_refs
+        labels = system.labels
         variables = len(variable_refs)
-        row_scales = np.maximum(np.max(np.abs(matrix), axis=1), 1.0)
-        normalized_matrix = matrix / row_scales[:, np.newaxis]
-        rank = np.linalg.matrix_rank(normalized_matrix)
-        dof = variables - rank
+        normalized_matrix = system.normalized_matrix
+        rank = system.rank
+        dof = system.degrees_of_freedom
 
         # Select a readable row basis in the same order constraints are assembled.
         # Each selected label raises the rank by one; omitted constraints are
@@ -496,60 +493,22 @@ class ProcessUnit:
 
         return variable_refs, np.asarray(rows), np.asarray(targets), labels
 
+    def _component_flow_system(self, component_names: list) -> ComponentFlowSystem:
+        """Return the assembled constraints as a named solver-system object."""
+        variable_refs, matrix, targets, labels = self._build_component_flow_system(
+            component_names
+        )
+        return ComponentFlowSystem(variable_refs, matrix, targets, labels)
+
     def _build_material_balance_dataframe(self) -> pd.DataFrame:
         """Build a table of basis-specific stream results.
 
         Total and component flow rows are separated into mass and molar bases;
         no row mixes values from different bases across streams.
         """
-        streams = self.input_streams + self.output_streams
-        component_names = sorted(
-            {component.name for stream in streams for component in stream.components}
+        return build_material_balance_dataframe(
+            self.input_streams + self.output_streams
         )
-        rows = [("mass_flow_rate", ""), ("molar_flow_rate", "")]
-        for variable in (
-            "component_mass_flow_rate",
-            "component_molar_flow_rate",
-            "mass_fraction",
-            "mole_fraction",
-        ):
-            rows.extend((variable, name) for name in component_names)
-        table = pd.DataFrame(
-            index=pd.MultiIndex.from_tuples(rows, names=("variable", "component"))
-        )
-
-        for stream in streams:
-            values = {
-                ("mass_flow_rate", ""): stream.mass_flow_rate,
-                ("molar_flow_rate", ""): stream.molar_flow_rate,
-            }
-            mass_fractions = stream.mass_fractions
-            mole_fractions = stream.mole_fractions
-            mass_total = stream.mass_flow_rate
-            molar_total = stream.molar_flow_rate
-            for component_name in component_names:
-                values[("mass_fraction", component_name)] = (
-                    None
-                    if mass_fractions is None
-                    else mass_fractions.get(component_name)
-                )
-                values[("mole_fraction", component_name)] = (
-                    None
-                    if mole_fractions is None
-                    else mole_fractions.get(component_name)
-                )
-                values[("component_mass_flow_rate", component_name)] = (
-                    None
-                    if mass_total is None or mass_fractions is None
-                    else mass_total * mass_fractions.get(component_name, 0.0)
-                )
-                values[("component_molar_flow_rate", component_name)] = (
-                    None
-                    if molar_total is None or mole_fractions is None
-                    else molar_total * mole_fractions.get(component_name, 0.0)
-                )
-            table[stream.name] = pd.Series(values)
-        return table
 
     def solve_material_balances(self) -> pd.DataFrame:
         """Solve balances and stream constraints as a linear feasibility problem.
@@ -579,50 +538,14 @@ class ProcessUnit:
         component_names = sorted(
             {comp.name for stream in streams for comp in stream.components}
         )
-        variable_refs, matrix, targets, labels = self._build_component_flow_system(
-            component_names
-        )
-
-        result = linprog(
-            c=np.zeros(len(variable_refs)),
-            A_eq=matrix,
-            b_eq=targets,
-            bounds=(0.0, None),
-            method="highs",
-        )
-        if not result.success:
-            if result.status == 2:
-                detail = "constraints are infeasible with nonnegative component flows"
-            else:
-                detail = result.message
+        system = self._component_flow_system(component_names)
+        variable_refs = system.variable_refs
+        try:
+            values = solve_nonnegative(system, self.tol)
+        except ValueError as error:
             raise ValueError(
-                f"Failed to solve material balances for '{self.name}': {detail}."
-            )
-
-        # Reject systems with more than one solution. Normalize equality rows
-        # first so the rank check is not affected by different flow magnitudes.
-        row_scales = np.maximum(np.max(np.abs(matrix), axis=1), 1.0)
-        normalized_matrix = matrix / row_scales[:, np.newaxis]
-        rank = np.linalg.matrix_rank(normalized_matrix)
-        if rank < len(variable_refs):
-            raise ValueError(
-                f"Process unit '{self.name}' is underdetermined: constraints "
-                "allow more than one component-flow solution."
-            )
-
-        values = result.x
-        residuals = matrix @ values - targets
-        for residual, target, label in zip(residuals, targets, labels):
-            if label.startswith("material balance"):
-                allowed_error = self.tol
-            else:
-                allowed_error = self.tol * max(1.0, abs(target))
-            if abs(residual) > allowed_error:
-                raise ValueError(
-                    f"Failed to solve material balances for '{self.name}': "
-                    f"{label} residual {residual:.6g} exceeds tolerance "
-                    f"{allowed_error:.6g}."
-                )
+                f"Failed to solve material balances for '{self.name}': {error}"
+            ) from error
 
         component_flows = {ref: value for ref, value in zip(variable_refs, values)}
 

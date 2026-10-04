@@ -6,6 +6,27 @@ A comprehensive Python module for modeling and solving material balance problems
 
 This module provides a structured framework for defining chemical process streams, equipment units, and solving material balance equations. It's designed for steady-state material balance calculations in unit operations like evaporators, mixers, splitters, and multi-stage processes.
 
+## Package organization
+
+The package separates domain models, constraint types, numerical solving, and
+reporting so additions stay localized:
+
+```text
+material_balances/
+├── component.py          # chemical-species model
+├── stream.py             # process-stream model
+├── factory.py            # shared-component stream construction
+├── basis.py              # flow-basis interpretation
+├── constraints/          # one module per constraint family
+├── solver/               # system representation and numerical solve
+└── reporting/            # tabular result presentation
+```
+
+`ProcessUnit` remains the public façade that validates a unit operation and
+coordinates these pieces. Package-root imports remain supported;
+`ratio_constraints.py` and `stream.StreamFactory` are compatibility imports
+for existing notebooks.
+
 ## Core Classes
 
 ### Component

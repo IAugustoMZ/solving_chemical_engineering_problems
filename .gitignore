@@ -56,3 +56,6 @@ coverage.xml
 
 # Video explanation documentation (local reference only)
 docs/video_explanations/
+
+# class demos
+notebooks/class_demos
